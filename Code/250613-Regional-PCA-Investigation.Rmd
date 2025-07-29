@@ -1,0 +1,130 @@
+---
+title: "240614-"
+author: "Jingxin Wang"
+date: "2025-06-13"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## To Dos
+
+1. Apply INT and log transformation to methylation data and apply classical PCA. Contrast these results with classical PCA on the raw data
+2. Read the regional PCA paper in details, identify what they do with the score matrix for each gene region, and identify the research question they are trying to answer.
+3. Read over the robust PCA and understand the mathematical principles
+
+## Important Update
+
+1. The project will be divided into 4 parts, and we are currently at stage 1 with a brief touch in stage 2.
+  - Preprocess the data
+  - Filtering out important genes (for each cancer types)
+  - Build gene networks
+  - Compare different networks
+2. Regional PCA relies on pre-defined segmentation of genes, but we want to come up with natural groupings of genes. This will be innovation target we try to achieve.
+
+# 1. What is the goal of the research?
+
+Identify cell-type specific DNA methylation changes that are associated with AD phenotypes.
+
+# 2. What did they do with the score matrix?
+
+1. Simulation study: to show that rPCA has a greater statistical power than simple averaging in finding the DMRs for every proportion of CpG sites and methlylation differences.
+2. Real dataset: the PCA score matrix $Z_r = X V_r$ is calculated for each gene region, and each column of $Z_r$ is treated as a rPC. Next, a `lmFit` is performed on each score matrix $Z-r$ to identify DMRs.
+3. `lmFit` fits multiple linear models by weighted or generalized least squares.
+
+# 3. Test Log Transformation and IVT as Data Preprocessing Step
+
+```{r fig.height=4, message=FALSE}
+## Function Definition
+source("IVT.R")
+source("pcaCombo.R")
+
+## Load Data
+library(tidyverse)
+X.T <-  readRDS(file = "../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+dim(X.T)
+
+sampleInfo <- read.csv("../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type[sampleInfo$sample_id %in% colnames(X.T)]
+
+## Raw data without preprocessing
+PC_raw = pcaCombo(t(X.T))
+
+## Log Transformation
+logX.T <- log(X.T + 1)
+PC_log = pcaCombo(t(logX.T))
+
+## IVT transformation
+k = 0.1
+ivtX.T <- IVT(X.T, k)
+PC_ivt = pcaCombo(t(ivtX.T))
+
+# Marginal distribution before and after transformations
+par(mfrow = c(1,3))
+hist(X.T[1:1000,], main = "Before any transformation", freq = F)
+hist(logX.T[1:1000,], main = "Log transformation", freq = F)
+hist(ivtX.T[1:1000,], main = "IVT transformation",freq = F)
+
+# Distribution of PC 1 values
+par(mfrow = c(1,3))
+hist(PC_raw, main = "PC raw", freq = F)
+hist(PC_log, main = "PC log", freq = F)
+hist(PC_ivt, main = "PC ivt", freq = F)
+```
+**Observations**:
+
+1. The marginal distribution: after log(x+1), the distribution is still right skewed between 0 and 6, resembling exponential distributions. After IVT, the distribution is more symmetrically distributed between -2 and 4. Log and IVT were performed independently.
+2. Classical PCA: before any transformation, all cancer types are collapsed together. After the log and IVT, the scatter plot spreads apart more, and the PC 1 plot becomes more symmetrically distributed around 0, and less spikes show up.
+3. With log transformation, Blood Cancer and pancreatic cancer showed increasing separation from other cancer types. After IVT, only Blood Cancer has good separation from the others.
+
+## 4. `limma lmFit()` Identifies Differential Genes
+
+```{r}
+library(limma)
+
+logMethy <- log(X.T + 1)
+groups <- factor(cancerTypes)
+designMat <- model.matrix(~groups)
+library(dplyr)
+
+fit <- lmFit(logMethy, design = designMat)
+fit <- eBayes(fit)
+testRes <- topTable(fit, adjust = "BH", number = 20000)
+testRes <- testRes %>% filter(adj.P.Val < 0.05)
+  
+
+## Filter out genes < 0.05
+
+volcanoplot(fit)
+```
+
+```{r}
+## IVT Transformation
+source("IVT.R")
+ivtMethy <- IVT(X.T, 0.1)
+
+fit2 <- lmFit(ivtMethy, design = designMat)
+fit2 <- eBayes(fit2)
+testRes2 <- topTable(fit2, adjust = "BH", number = 100)
+head(testRes2, 50)
+volcanoplot(fit2)
+```
+
+## Next Step
+1. 3D PCA plots
+  - All cancer types
+  - Control vs cancer
+  - Sparse PCA --> Important Genes
+2. Significant Genes
+  - Control vs. cancer, with reduced threshold 0.01
+  - Histogram for significant genes between controls and cancers
+3. Check graphical Lasso 
+4. Literature search on genome network
+5. Investigate the math principles of `eBayes` and why it is needed in `limma` (if limma is used to filter genes)
+6. Update important findings and progress on `Overleaf` shared document with Elena
+
+
+  
+

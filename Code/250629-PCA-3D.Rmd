@@ -1,0 +1,134 @@
+---
+title: "240614-"
+author: "Jingxin Wang"
+date: "2025-06-13"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## To Dos
+
+1. 3D PCA plots
+  - All cancer types
+  - Control vs cancer
+  - Sparse PCA --> Important Genes
+2. Significant Genes
+  - Control vs. cancer, with reduced threshold 0.01
+  - Histogram for significant genes between controls and cancers
+3. Check graphical Lasso 
+4. Literature search on genome network
+5. Investigate the math principles of `eBayes` and why it is needed in `limma` (if limma is used to filter genes)
+6. Update important findings and progress on `Overleaf` shared document with Elena
+
+
+# Classical PCA
+
+```{r fig.height=4, message=FALSE}
+## Function Definition
+source("IVT.R")
+source("pcaCombo.R")
+
+## Load Data
+library(tidyverse)
+X.T <-  readRDS(file = "../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+
+sampleInfo <- read.csv("../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type[sampleInfo$sample_id %in% colnames(X.T)]
+
+## Raw data without preprocessing
+PC_raw = pcaCombo(t(X.T))
+
+## Log Transformation
+logX.T <- log(X.T + 1)
+PC_log = pcaCombo(t(logX.T))
+
+## IVT transformation
+k = 0.1
+ivtX.T <- IVT(X.T, k)
+PC_ivt = pcaCombo(t(ivtX.T))
+
+# Marginal distribution before and after transformations
+par(mfrow = c(1,3))
+hist(X.T[1:1000,], main = "Before any transformation", freq = F)
+hist(logX.T[1:1000,], main = "Log transformation", freq = F)
+hist(ivtX.T[1:1000,], main = "IVT transformation",freq = F)
+
+# Distribution of PC 1 values
+par(mfrow = c(1,3))
+hist(PC_raw$PC1, main = "PC raw", freq = F)
+hist(PC_log$PC1, main = "PC log", freq = F)
+hist(PC_ivt$PC1, main = "PC ivt", freq = F)
+
+## 3D Distributions
+colnames(score_raw)[3] <- "PC3"
+colnames(score_log)[3] <- "PC3"
+colnames(score_ivt)[3] <- "PC3"
+
+makeScore3D <- function(df, PCM) {
+  ## df: p*n matrix, rows are features, columns are observations
+  ## PCM: PC matrix with the top 3 PCs
+  score <- t(t(PCM) %*% df)
+  colnames(score) <- paste0("PC", 1:ncol(score))
+  score <- cbind(score, 
+                "Healthy" = ifelse(cancerTypes == "Normal", "Healthy", "Cancer"))
+  score <- cbind(score, "Types"= cancerTypes)
+  score <- data.frame(score)
+  
+  score
+}
+
+score_raw <- makeScore3D(X.T, PC_raw)
+score_log <- makeScore3D(logX.T, PC_log)
+score_ivt <- makeScore3D(ivtX.T, PC_ivt)
+
+library(plotly)
+score3D(score_raw, 'Score Scatter Plot of Healthy vs Cancer', "Healthy")
+score3D(score_log, 'Score Scatter Plot of Healthy vs Cancer', "Healthy")
+score3D(score_ivt, 'Score Scatter Plot of Healthy vs Cancer', "Healthy")
+
+score3D(score_raw, 'Score Scatter Plot of Cancer Types', "Types")
+score3D(score_log, 'Score Scatter Plot of Cancer Types', "Types")
+score3D(score_ivt, 'Score Scatter Plot of Cancer Types', "Types")
+```
+
+## Sparse PCA
+
+```{r}
+source("pcaCombo.R")
+# debug(sparsePcaCombo)
+
+V.sparse.before <- sparsePcaCombo(t(X.T), 10, 10, cancerTypes)
+V.sparse.log <- sparsePcaCombo(t(logX.T), 10, 10, cancerTypes)
+V.sparse.ivt <- sparsePcaCombo(t(ivtX.T), 10, 10, cancerTypes)
+
+V.classical.log <- pcaCombo(t(logX.T))
+PC = prcomp(t(logX.T), center = T)
+range(PC$rotation[,1])
+hist(logX.T)
+V.sparse.log <- sparsePcaCombo(logX, 10, 10, cancerTypes)
+```
+```{r}
+## Distribution of percentages of zero value in each column
+zero.perc <- apply(t(logX.T), MARGIN = 2, function(x) mean(x == 0))
+hist(zero.perc)
+```
+
+
+```{r}
+score_sparse_raw <- makeScore3D(X.T, V.sparse.before[,1:3])
+score_sparse_log <- makeScore3D(logX.T, V.sparse.log[,1:3])
+score_sparse_ivt <- makeScore3D(ivtX.T, V.sparse.ivt[,1:3])
+
+score3D(score_sparse_raw, title = 'Sparse PCA, Before, K = 10, L1 norm <= 10', colorFactor = "Types")
+score3D(score_sparse_log, title = 'Sparse PCA, Log, IVT K = 10, L1 norm <= 10', colorFactor = "Types")
+score3D(score_sparse_ivt, title = 'Sparse PCA, IVT, K = 10, L1 norm <= 10', colorFactor = "Types")
+
+```
+```{r}
+write.csv(V.sparse.before, "Top10PCNoTrans.csv")
+write.csv(V.sparse.before, "Top10PCLog.csv")
+write.csv(V.sparse.before, "Top10PCIVT.csv")
+```
