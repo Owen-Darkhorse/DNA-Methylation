@@ -1,31 +1,31 @@
 pcaCombo <- function(X) {
   PCA <- prcomp(X, center = T, scale = F, rank. = min(dim(X)))
+  # browser()
   
   ## Compute Scree Plot
   totalVar <- sum(PCA$sdev^2)
   varExpl <- PCA$sdev^2/totalVar
   
   # PCs that explain > 1% of variances
-  minPC <- which(varExpl > 0.01)
+  minPC <- which.min(varExpl > 0.01)-1
   percPCmin <- varExpl[minPC]
   scree <- data.frame(
     "k" = 1:min(dim(X)),
     "perc" = varExpl
   )
   
-  limitPC <- which.min(-diff(percPCmin, 1) < 0.03)
-  
   
   A <- ggplot(scree) + 
     geom_line(aes(x = k, y = perc, 
                   color = adjustcolor("red", alpha = 0.4)), 
               stat = "identity")+
-    geom_hline(linetype = "dashed", yintercept = percPCmin[limitPC]) + 
-    geom_vline(linetype = "dashed", xintercept = limitPC) +
+    geom_hline(linetype = "dashed", yintercept = percPCmin) + 
+    geom_vline(linetype = "dashed", xintercept = minPC) +
     xlab("# of PCs") + 
     ylab("Proportion of variance explained")+
-    ggtitle("Scree Plot") + 
-    theme(legend.position = "none") 
+    labs(title = "Screen Plot", 
+         subtitle = paste0(minPC, "PCs explains at least 1% of variance")) +
+    theme(legend.position = "none")
   
   ## Compute PC1 vs PC 2 Scatter Plot
   Z3 <- scale(X) %*% PCA$rotation[,1:3]

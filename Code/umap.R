@@ -1,5 +1,5 @@
 UMAP.2d <- function(X, cancerTypes) {
-  UMAP = umap(X, config = custom.config)
+  UMAP = umap(X, config = umap.defaults)
   
   colnames(UMAP$layout) = c("x1", "x2")
   df = data.frame(UMAP$layout)
@@ -18,7 +18,7 @@ UMAP.2d <- function(X, cancerTypes) {
 
 UMAP.3d <- function(X, cancerTypes) {
   UMAP = umap(X, config = umap.defaults)
-  
+  browser()
   colnames(UMAP$layout) = c("x1", "x2", "x3")
   df = data.frame(UMAP$layout)
   df$Types = as.factor(cancerTypes)

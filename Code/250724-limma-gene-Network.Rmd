@@ -114,10 +114,8 @@ glassoRes <- glasso(S, rho = 0.01,
            maxit = 100)
 
 ## Plot the heatmap and the graph
-source("iris_heatmap.R")
-heatmap(glassoRes$wi)
-hist(glassoRes$wi, main = "Distribution of Inverse Covariance Entries", col = "pink", breaks = "Scott")
-
+# source("iris_heatmap.R")
+# heatmap(glassoRes$wi)
 
 library(igraph)
 weightMat <- glassoRes$wi
@@ -141,9 +139,34 @@ plot.igraph(sparseCovInvGraph,
 save(umap.output, glassoRes, sparseCovInvGraph, file = "../Data/pipelineCache.Rdata")
 
 load("../Data/pipelineCache.Rdata")
+```
 
-hist(glassoRes$w, main = "distribution of penalized covariance matrix",
-     breaks = "Scott", col = "pink")
+## Bell-shaped Corr Distribution Near 0
+```{r}
+geneSamp <- sample(colnames(logX), 200)
 
+S <- var(logX[, geneSamp]) ## Covariance matrix of the top 200 genes
+glassoRes <- glasso(S, rho = 0.1,
+           nobs = nrow(logX),
+           maxit = 100)
+penalizedCov <- glassoRes$w
+penalizedCorrelation <- penalizedCov / sqrt(outer(diag(penalizedCov), diag(penalizedCov)) )
+
+
+par(mfrow = c(2,2))
+hist(cor(logX[, top200dmrs]), main = "Distribution of correlations before penalty",
+breaks = "Scott", col = "pink")
+
+hist(S, main = "Distribution of covariance before penalty", col = "pink", breaks = "Scott")
+
+hist(glassoRes$w, main = "Distribution of penalized covariance",
+breaks = "Scott", col = "pink")
+
+hist(penalizedCorrelation, main = "Distribution of penalized correlations", col = "pink", breaks = "Scott")
+
+
+hist(solve(S), main = "Distribution of nverse penalized covariance", col = "pink", breaks = "Scott")
+
+hist(solve(glassoRes$w), main = "Distribution of inverse penalized covariance", col = "pink", breaks = 200)
 
 ```
