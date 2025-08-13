@@ -1,0 +1,281 @@
+---
+title: "250721-Classical-PCA-Network-Pipeline"
+author: "250539-PCA-Next-Step"
+date: "2025-07-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Data
+```{r fig.height=4, message=FALSE}
+## Load  Methylation Data
+library(tidyverse)
+X.T <-  readRDS(file = "../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+
+## Load Cancer Types
+sampleInfo <- read.csv("../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type[sampleInfo$sample_id %in% colnames(X.T)]
+
+## Log Transformation and save
+logX <- t(log(X.T + 0.1)) # 378 * 24418 matrix
+
+## Save Data
+save(logX, cancerTypes, file="../Data/preprocData.RDS")
+```
+
+## Limma Filtering Genes using B-statistics
+```{r}
+groups <- ifelse(cancerTypes=="Normal", 0, 1)
+designMat <- model.matrix(~groups)
+
+library(limma)
+# logX <- t(log2(X.T + 0.1))
+fit <- lmFit(X.T, design = designMat)
+fit <- eBayes(fit)
+
+## Identify DMR genes using two thresholds:
+## log2(FC) >  1, -log(p-value) > 0.05
+testRes <- topTable(fit, adjust = "BH",
+                    sort.by = "B",
+                    number = Inf)
+## B-statistics
+Q95B <- quantile(testRes$B, probs = c(0.95))
+hist(testRes$B, main = "Distribution of B statistics", 
+     freq = F)
+abline(v = Q95, lty = 2)
+text(paste("95% quantile:\n", Q95B), x = Q95B, y = 0.05)
+
+## T-statistics
+Q95T <- quantile(testRes$t, probs = c(0.95))
+hist(testRes$t, 
+     main = "Distribution of moderated t statistics", 
+     freq = F)
+abline(v = Q95T, lty = 2)
+text(paste("95% quantile:\n", Q95T), x = Q95T, y = 0.05)
+
+## Volcano plot
+ggplot(data = testRes, aes(x = logFC, y = -log10(adj.P.Val)))+
+  geom_point()+
+  coord_cartesian(xlim = c(0, 8), ylim = c(0,25))+
+  labs(title = "Volcano plot of hypermethylated genes")+
+  geom_hline(yintercept =-log10(0.01), linetype = "dashed")+
+  geom_vline(xintercept = 1, linetype = "dashed")
+```
+
+## Glasso Running Time on Different Number of DMRs
+
+```{r}
+# load("../Data/preprocData.RDS")
+# load("../Output/PCA_results.RDS")
+
+library(glasso)
+library(igraph)
+library(tidygraph)
+library(ggraph)
+library(cowplot)
+
+p_vec <- seq(200, 1000, 200) ## the number DMRs to be included
+S <- var(logX[groups==0, top200dmrsbyB]) 
+n=sum(groups==0)
+rho = 1
+
+### Running time in healthy subjects
+time.diff.healthy <- data.frame("p" = c(), "Elapsed Time" = c())
+for (p in p_vec) {
+  top200dmrsbyB <- head(testRes, p) %>% rownames()
+  time.begin <- Sys.time()
+  glassoRes <- glasso(S, rho = rho,
+             nobs = n,
+             maxit = 100)
+  time.end <- Sys.time()
+  time.elapsed <- time.end - time.begin
+  
+  time.diff.healthy <- rbind(time.diff.healthy, c(p,time.elapsed))
+}
+
+colnames(time.diff.healthy) <- c("p", "Elapsed Time")
+time.diff.healthy
+
+### Running time in cancer subjects
+S <- var(logX[groups==1, top200dmrsbyB]) 
+n=sum(groups==1)
+time.diff.cancer <- data.frame()
+for (p in p_vec) {
+  top200dmrsbyB <- head(testRes, p) %>% rownames()
+  time.begin <- Sys.time()
+  glassoRes <- glasso(S, rho = rho,
+             nobs = n,
+             maxit = 100)
+  time.end <- Sys.time()
+  time.elapsed <- time.end - time.begin
+  
+  time.diff.cancer <- rbind(time.diff.cancer, c(p,time.elapsed))
+}
+
+colnames(time.diff.cancer) <- c("p", "Elapsed Time")
+time.diff.cancer
+```
+Elapsed time doesn't increase significantly with number of DMRs, but cancer group took much longer than the healthy group.
+
+## Creating Glasso Graphs with optimal rho =1, 200 DMRs
+```{r}
+distinctStatus <- unique(cancerTypes)
+rho <- 1
+k=1
+graphPlotList <- list()
+histPlotList <- list()
+top200dmrsbyB <-  head(testRes, 200) %>% rownames()
+for (status in distinctStatus) {
+  print("===================================\n")
+  cat(paste("Disease Status =", status, "\n"))
+  
+  S <- var(logX[cancerTypes==status, top200dmrsbyB]) 
+  n <- sum(groups==status)
+  glassoRes <- glasso(S, rho = rho,
+             nobs = nrow(logX),
+             maxit = 100)
+  
+  ## Compute partial correlation matrix from inverse covariance matrix
+  invCovarMat <- glassoRes$wi
+  invCovarDiag <- diag(invCovarMat)
+  partCovarMat <- -invCovarMat / sqrt(outer(invCovarDiag, invCovarDiag))
+  
+  symmPartCovarMat <- (partCovarMat + t(partCovarMat))/2
+  
+  sparseCovInvGraph <-
+    graph_from_adjacency_matrix(symmPartCovarMat,
+                                mode = "undirected",
+                                weighted = T) %>%
+    as_tbl_graph() %>%
+    activate(edges) %>%
+    filter(from != to)
+  
+  ## Visualize Graph
+  graphPlotList[[k]] = ggraph(sparseCovInvGraph, 
+         layout = 'linear', circular = TRUE) + 
+    geom_node_point()+
+    geom_edge_arc(aes(colour = weight)) + 
+    scale_edge_colour_gradient(low="grey",
+                                high="black",
+                                limits = c(0, 0.4))+
+    coord_fixed()+
+    labs(subtitle = paste("rho = 1,", status),
+         colour = "Pcorr")
+  
+  ## Distribution of upper off-diagonal entries in the covariance matrix
+  offDiagValues <- symmPartCovarMat[row(symmPartCovarMat) !=
+                                      col(symmPartCovarMat)]
+  histPlotList[[k]] = ggplot(data.frame(x = offDiagValues))+
+    geom_histogram(aes(x), binwidth = 0.001)+
+    labs(subtitle = paste("rho = 1,", status))+
+    xlab("Off-Diagonal Entries") +
+    ylab("Count")+
+    coord_cartesian(xlim = c(0, 0.4))
+  
+  cat(paste("Disease Status", status, "is finished\n"))
+  k = k+1
+}
+
+plot_grid(plotlist = graphPlotList,
+          nrow = 3, ncol = 3)
+ggsave(paste("../Images/PartialCorrGraphs_byType_rho1", ".png"))
+
+plot_grid(plotlist = histPlotList,
+          nrow = 3, ncol = 3)
+ggsave(paste("../Images/PartialCorrHists_byType_rho1", ".png"))
+```
+
+## Selecting the Best rho for each cancer Type
+```{r}
+## Covariance matrix of the top 200 genes in B-statistics
+## Subset healthy control for the null network
+S <- var(logX[groups==0, top200dmrsbylimma]) 
+lowlim <- 0.5
+highlim <- 2
+stepsize <- 0.1
+rholist <- seq(lowlim, highlim, stepsize)
+graphPlotList <- list()
+histPlotList <- list()
+k=1
+
+for (rho in rholist) {
+  print("===================================")
+  cat(paste("Running rho =", rho))
+  glassoRes <- glasso(S, rho = rho,
+             nobs = nrow(logX),
+             maxit = 100)
+  
+  invCovarMat <- glassoRes$wi
+  invCovarDiag <- diag(invCovarMat)
+  partCovarMat <- -invCovarMat / sqrt(outer(invCovarDiag, invCovarDiag))
+  
+  symmPartCovarMat <- (partCovarMat + t(partCovarMat))/2
+  
+  sparseCovInvGraph <-
+    graph_from_adjacency_matrix(symmPartCovarMat,
+                                mode = "undirected",
+                                weighted = T) %>%
+    as_tbl_graph() %>%
+    activate(edges) %>%
+    filter(from != to)
+  
+  graphPlotList[[k]] = ggraph(sparseCovInvGraph, 
+         layout = 'linear', circular = TRUE) + 
+    geom_node_point()+
+    geom_edge_arc(aes(colour = weight)) + 
+    scale_edge_colour_gradient(low="grey",
+                                high="black",
+                                limits = c(0, 0.4))+
+    coord_fixed()+
+    labs(subtitle = paste("rho = ", rho),
+         colour = "Pcorr")
+  
+  offDiagValues <- symmPartCovarMat[row(symmPartCovarMat) !=
+                                      col(symmPartCovarMat)]
+    
+  histPlotList[[k]] = ggplot(data.frame(x = offDiagValues))+
+    geom_histogram(aes(x), binwidth = 0.001)+
+    labs(subtitle = paste("rho = ", rho))+
+    xlab("Off-Diagonal Entries") +
+    ylab("Count")+
+    coord_cartesian(xlim = c(0, 0.4))
+  
+  cat(paste("rho =", rho, "is finished."))
+  k = k+1
+}
+
+plot_grid(plotlist = graphPlotList,
+          nrow = 3, ncol = 3)
+ggsave(paste("../Images/nullPartialCorrGraphs", lowlim, "--", highlim, ".png"))
+
+plot_grid(plotlist = histPlotList,
+          nrow = 3, ncol = 3)
+ggsave(paste("../Images/nullPartialCorrHists", lowlim, "--", highlim, ".png"))
+
+
+# glassoPathRes <- glassopath(S, rholist = rholist,
+#            trace = T)
+# layout_nice <- layout_nicely(sparseCovInvGraph)
+# plot.igraph(sparseCovInvGraph,
+#           edge.width = E(sparseCovInvGraph)$weight,
+#           # edge.color = E(sparseCovInvGraph)$weight,
+#           vertex.size=3,
+#           vertex.label=NA,
+#           layout = layout_nice,
+#           main = paste("Rho =", rho))
+```
+
+## Saving Results
+```{r}
+save(umap.output, glassoRes, sparseCovInvGraph, file = "../Data/pipelineCache.Rdata")
+
+load("../Data/pipelineCache.Rdata")
+
+hist(glassoRes$w, main = "distribution of penalized covariance matrix",
+     breaks = "Scott", col = "pink")
+
+
+```

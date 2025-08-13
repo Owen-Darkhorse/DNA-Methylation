@@ -1,0 +1,245 @@
+---
+title: "250721-Classical-PCA-Network-Pipeline"
+author: "250539-PCA-Next-Step"
+date: "2025-07-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Data
+```{r fig.height=4, message=FALSE}
+## Load  Methylation Data
+library(tidyverse)
+X.T <-  readRDS(file = "../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+
+## Load Cancer Types
+sampleInfo <- read.csv("../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type[sampleInfo$sample_id %in% colnames(X.T)]
+
+## Log Transformation and save
+logX <- t(log(X.T + 0.1)) # 378 * 24418 matrix
+
+## Save Data
+save(logX, cancerTypes, file="../Data/preprocData.RDS")
+```
+
+## Limma Filtering Genes using B-statistics
+```{r}
+groups <- ifelse(cancerTypes=="Normal", 0, 1)
+designMat <- model.matrix(~groups)
+
+library(limma)
+# logX <- t(log2(X.T + 0.1))
+fit <- lmFit(X.T, design = designMat)
+fit <- eBayes(fit)
+
+## Identify DMR genes using two thresholds:
+## log2(FC) >  1, -log(p-value) > 0.05
+testRes <- topTable(fit, adjust = "BH",
+                    sort.by = "B",
+                    number = Inf)
+## B-statistics
+Q95B <- quantile(testRes$B, probs = c(0.95))
+hist(testRes$B, main = "Distribution of B statistics", 
+     freq = F)
+abline(v = Q95, lty = 2)
+text(paste("95% quantile:\n", Q95B), x = Q95B, y = 0.05)
+
+## T-statistics
+Q95T <- quantile(testRes$t, probs = c(0.95))
+hist(testRes$t, 
+     main = "Distribution of moderated t statistics", 
+     freq = F)
+abline(v = Q95T, lty = 2)
+text(paste("95% quantile:\n", Q95T), x = Q95T, y = 0.05)
+
+## Volcano plot
+ggplot(data = testRes, aes(x = logFC, y = -log10(adj.P.Val)))+
+  geom_point()+
+  coord_cartesian(xlim = c(0, 8), ylim = c(0,25))+
+  labs(title = "Volcano plot of hypermethylated genes")+
+  geom_hline(yintercept =-log10(0.01), linetype = "dashed")+
+  geom_vline(xintercept = 1, linetype = "dashed")
+  
+## 
+top200dmrsbyB <- head(testRes, 200) %>% rownames()
+top200dmrsbyT <- rownames(testRes)[order(abs(testRes$t), decreasing = T)[1:200]]
+
+top200dmrsbylimma <- top200dmrsbyB
+```
+
+## Classical PCA and Select Top 200 Genes
+```{r}
+load("../Data/preprocData.RDS")
+
+## Classical PCA and get the first PC
+source("pcaCombo.R")
+PC_log = pcaCombo(logX)
+PC1 <- PC_log[,1]
+
+## Order the PC1 and get the first 200 gene codes
+top200indx <- order(abs(PC1), decreasing = T)[1:200]
+top200dmrs <- colnames(logX)[top200indx]
+
+## Visualize the distribution of the PC1
+hist(PC1, main = "Frequency Distribution of PC 1", col = "pink")
+
+
+## Saving results
+save(top200dmrs, PC_log, file = "../Output/PCA_results.RDS")
+```
+
+## Compare Different Screening Results
+
+```{r}
+# Compare dmrs selected by PCA and by Limma B values
+library(VennDiagram)
+## Intersection of DMRs between these two methods
+# intersect(top200dmrsbylimma, top200dmrs)
+
+venn.diagram(
+  x = list(top200dmrsbyB, top200dmrsbyT, top200dmrs),
+  category.names = c("B-stat Top 200" , "Moderated T Top 200" , "PCA Top 200"),
+  filename = '../Images/screening_venn_diagramm.png',
+  output=TRUE
+)
+
+```
+
+
+## UMAP on Top 200 PCs
+```{r}
+library(umap)
+source("umap.R")
+umap.defaults$n_neighbors = 5
+umap.defaults$min_dist = 0.2
+umap.defaults$n_components = 2
+
+log.svd <- svd(logX)
+K = 200
+score200 <- logX %*% log.svd$v[,1:K]
+UMAP.2d(score200, cancerTypes)
+```
+
+## 3D Visualization of the first 3 PCs Scores
+```{r}
+source("score3D.R")
+
+## 3D Visualization of Scores Derived from All Genes
+frame3D <- makeScore3D(logX, PC_log[,1:3], cancerTypes)
+score3D(frame3D, title = "3D Score Scatter Plot of log X", "Types")
+```
+
+```{r}
+## Build 3D UMAP from the Top 200 Genes
+umap.defaults$n_neighbors = 5
+umap.defaults$min_dist = 0.2
+umap.defaults$n_components = 3
+
+UMAP.3d(score200, cancerTypes)
+```
+
+
+## Glasso on the Top 200 Genes
+```{r}
+load("../Data/preprocData.RDS")
+load("../Output/PCA_results.RDS")
+
+library(glasso)
+library(igraph)
+library(tidygraph)
+library(ggraph)
+library(cowplot)
+
+## Covariance matrix of the top 200 genes in B-statistics
+## Subset healthy control for the null network
+S <- var(logX[groups==0, top200dmrsbylimma]) 
+lowlim <- 0.5
+highlim <- 2
+stepsize <- 0.1
+rholist <- seq(lowlim, highlim, stepsize)
+graphPlotList <- list()
+histPlotList <- list()
+k=1
+
+for (rho in rholist) {
+  print("===================================")
+  cat(paste("Running rho =", rho))
+  glassoRes <- glasso(S, rho = rho,
+             nobs = nrow(logX),
+             maxit = 100)
+  
+  invCovarMat <- glassoRes$wi
+  invCovarDiag <- diag(invCovarMat)
+  partCovarMat <- -invCovarMat / sqrt(outer(invCovarDiag, invCovarDiag))
+  
+  symmPartCovarMat <- (partCovarMat + t(partCovarMat))/2
+  
+  sparseCovInvGraph <-
+    graph_from_adjacency_matrix(symmPartCovarMat,
+                                mode = "undirected",
+                                weighted = T) %>%
+    as_tbl_graph() %>%
+    activate(edges) %>%
+    filter(from != to)
+  
+  graphPlotList[[k]] = ggraph(sparseCovInvGraph, 
+         layout = 'linear', circular = TRUE) + 
+    geom_node_point()+
+    geom_edge_arc(aes(colour = weight)) + 
+    scale_edge_colour_gradient(low="grey",
+                                high="black",
+                                limits = c(0, 0.4))+
+    coord_fixed()+
+    labs(subtitle = paste("rho = ", rho),
+         colour = "Pcorr")
+  
+  offDiagValues <- symmPartCovarMat[row(symmPartCovarMat) !=
+                                      col(symmPartCovarMat)]
+    
+  histPlotList[[k]] = ggplot(data.frame(x = offDiagValues))+
+    geom_histogram(aes(x), binwidth = 0.001)+
+    labs(subtitle = paste("rho = ", rho))+
+    xlab("Off-Diagonal Entries") +
+    ylab("Count")+
+    coord_cartesian(xlim = c(0, 0.4))
+  
+  cat(paste("rho =", rho, "is finished."))
+  k = k+1
+}
+
+plot_grid(plotlist = graphPlotList,
+          nrow = 3, ncol = 3)
+ggsave(paste("../Images/nullPartialCorrGraphs", lowlim, "--", highlim, ".png"))
+
+plot_grid(plotlist = histPlotList,
+          nrow = 3, ncol = 3)
+ggsave(paste("../Images/nullPartialCorrHists", lowlim, "--", highlim, ".png"))
+
+
+# glassoPathRes <- glassopath(S, rholist = rholist,
+#            trace = T)
+# layout_nice <- layout_nicely(sparseCovInvGraph)
+# plot.igraph(sparseCovInvGraph,
+#           edge.width = E(sparseCovInvGraph)$weight,
+#           # edge.color = E(sparseCovInvGraph)$weight,
+#           vertex.size=3,
+#           vertex.label=NA,
+#           layout = layout_nice,
+#           main = paste("Rho =", rho))
+```
+
+## Saving Results
+```{r}
+save(umap.output, glassoRes, sparseCovInvGraph, file = "../Data/pipelineCache.Rdata")
+
+load("../Data/pipelineCache.Rdata")
+
+hist(glassoRes$w, main = "distribution of penalized covariance matrix",
+     breaks = "Scott", col = "pink")
+
+
+```

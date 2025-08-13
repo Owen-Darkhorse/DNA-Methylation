@@ -1,0 +1,194 @@
+---
+title: "Untitled"
+author: "250539-PCA-Next-Step"
+date: "2025-05-30"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Key Questions
+
+1. What data preprocessing can work on methylation data? Do we need to scale it or row center it? This is essential to feature selection.
+2. What dimension reduction method should we choose? What modification of PCA should we choose?
+3. If we want to compare graphs of important gene networks, what summary features should we choose to reduce computational complexity? How to measure them? (far away, after important genes are filtered out)
+
+
+## Next Step
+
+1. Unify bin size of the methylation distribution graphs
+2. Literature search for dimensional reduction on hyper and hypo methylation, PCA can only find important features by very large absolute values, not by values near 0.
+3. Mathematical explanation on why only negative values show up in PC 1, further investigate relationship between $\bf v_1$ and $\bf u_1$, beyond matrix multiplication of $C_p$
+4. Read neuroscience paper recommended by Elena and self-teach graph properties.
+5. Generalized results and simulations for non-negative matrix singular vector signs.
+
+## 1. How to interprete the DNA mathylation dataset?
+
+Raw methylation was quantified as methylation counts of base pairs in consecutive 300 base pair (bp) intervals across the genome. Then, ComBat-Seq was applied to remove batch effect, and DESeq2 was applied to normalize the batch-corrected counts.
+
+In the supplementary matrials, the link to the source code is attached: ![Source code](https://github.com/HansenHeLab/cfMeDIP-seq_Data_Resource_Codes/blob/main/1_Methylation_Scripts/R_scripts_to_process_features/4.2_Batch_correction_for_SE_PE.R)
+
+The image below shows that `Combat_seq` assumes that the raw methylation count data follows a negative binomial distribution: $NB(\mu_{gij}, \phi_{gi})$, where $\mu_{gij}, \phi_{gi}$ are the mean and dispersion parameter. The log mean count of gene g in batch i and sample j is linearly modelled by 
+
+1. $\alpha_g$: The overall the level of gene g
+2. $X_j$: The biological condition of sample j
+3. $\beta_g$: The regression cofficient for the gene g
+4. $\gamma_{gi}$: The mean match effect of batch i and gene j
+5. $N_j$: The total count of all genes in sample j
+
+The mean value of the batch-free distribution is estimated. Every $y_{gij}$ in the empirical distribution is mapped to the closest quantile in the batch free distribution. Since NB distribution is integer valued, the quantile mapped to will also be an integer.
+
+![Basic Workflow of Batch Correction](../Images/ComBat-seq.jpeg)
+Source: ![ComBat-seq: batch effect adjustment for RNA-seq count data ](https://academic.oup.com/nargab/article/2/3/lqaa078/5909519)
+
+The batch-corrected values can be proportional to both the actual methylation of DNA and many other uninteresting factors such as 1) Sequencing depth of genes in different samples 2) gene length 3) RNA composition.
+
+DESeq2 adjust the methylation scores by both sequencing depth and RNA composition. DESeq2 applies a median of ratios method in following steps:
+
+1. Create a psuedo-reference sample: by computing the geometric mean of each gene across samples. Such geometric means will be used as a reference.
+2. Ratio of sample to the reference: for each gene, divide the methylation different sample by the corresponding the pseudo-reference.
+3. Calculate the normalization factor for each sample: for each given sample, find the median of all ratios, such a median will be used as the normalization factor, or the size factor.
+4. Normalize the count: divide each count value in a given sample by that sample's normalization factor. Integer valued methylation will become decimal in this step.
+
+"This method is robust to imbalance in up-/down-regulation and large numbers of differentially expressed genes."
+
+Source: ![Introduction of DESeq2](https://hbctraining.github.io/DGE_workshop/lessons/02_DGE_count_normalization.html)
+Documentation of `estimateSizeFactor()` in `DESeq2` package: ![estimateSizeFactor()]https://www.rdocumentation.org/packages/DESeq2/versions/1.12.3/topics/estimateSizeFactors
+
+
+## 2. Simulation: is the first right singular vector always negative?
+
+```{r}
+n <- 10
+p <- 50
+B <- 200 ## Simulate 100 times
+allNegLeft.vec <- c()
+allNegRight.vec <- c()
+
+
+for (b in 1:B) {
+  X <- rexp(n*p, 3)
+  X <- matrix(X, nrow = n, ncol = p)
+  
+  svdRes <- svd(X)
+  u1 <- svdRes$u[,1]
+  v1 <- svdRes$v[,1]
+  
+  # print(svdRes$d)
+  allNegLeft.vec <- c(allNegLeft.vec, all(v1 < 0))
+  allNegRight.vec <- c(allNegRight.vec, all(u1 < 0))
+}
+
+cat("Times that all v1 elements are negative:", sum(allNegRight.vec), "\n")
+cat("Times that all u1 elements are negative:", sum(allNegLeft.vec))
+```
+Observation: the top right singular vector is always negative in the simulation. Left singular vectors are negative as well.
+
+Question: what if one of the singular values of $X^T X$ is negative, how is the corresponding singular vector adjusted accordingly?
+
+```{r}
+## Simulation: generate the left and right singular matrices
+U <- svdRes$u
+V <- svdRes$v
+D <- diag(c(5,-5, 0,0,0,0,0,0,0,0))
+
+Z <- U %*% D %*% t(V)
+Z.svdRes <- svd(Z)
+plot(Z.svdRes$d)
+heatmap(t(sign(Z.svdRes$v)))
+```
+Observation: true singular values of the same absolute values repeated themselves in the estimated singular value list. This means if that the construction of the data matrix contains negative weight, they will be masked by the positive version during the SVD of the target matrix.
+
+
+
+```{r}
+# seCount.svd <- svd(seCount)
+# plot(seCount.svd$d[1:20], type = "l")
+# 
+# heatmap(sign(seCount.svd$u[1:50, 1:20]))
+```
+
+
+## 3. Sample centering: the relationship between right singular vector in the original matrix and in the row-centred (sample-centred) matrix
+
+Treating every sample of the mathylation matrix as a row, before the row centering, finding the top PC is equivalent to solving the following optimization problem:
+$$
+\text{max } \{\bf v_1^T S \bf{v_1} \} \text{   s.t   } \|v_1 \|_2 = 1
+$$ 
+
+where $S = \frac{1}{n-1} X^T C_n X$, and $C_n$ is the column centering operator.
+
+After row-centering, the optimization becomes:
+$$
+\text{max } \{\bf w_1^T (\frac{1}{n-1} C_p X^T C_n X C_p) \bf{w_1} \} \text{   s.t   } \|w_1 \|_2 = 1
+$$
+Let $\bf{u_1} = C_p \bf{w_1}$, the problem can be reformulated as 
+$$
+\text{max } \{\bf{u_1}^t (\frac{1}{n-1} X^T C_n X) \bf{u_1} \} \text{   s.t   } \|\bf{u_1} \|_2 = 1 - \bar{v}^2
+$$
+where $\bar{v}$ is the average value of elements in the first PC.
+
+
+The Lagarangian is:
+
+$$
+L(\bf{u_1}, \lambda) = \bf{u_1}^t S \bf{u_1} + \lambda*(1 - \bar{v}^2 - \bf{u_1}^T \bf{u_1})
+$$
+Taking partial derivatives and setting to 0:
+$$
+\frac{\partial L}{\partial \bf{u_1}} = 2 S \bf{u_1} - 2\lambda*\bf{u_1} = 0
+$$
+$$
+\frac{\partial L}{\partial \lambda} = 1 - \bar{v}^2 - \bf{u_1}^T \bf{u_1} = 0
+$$
+
+1. Let $\bf{v_1}^*$ and $\bf{u_1}^*$ be the solution to the maximization problem before and after row-centering. $\frac{\partial L}{\partial \bf{u_1}} = 0$ suggests that $\bf{u_1}^*$ is the first eigenvalue of S, so $\bf{u_1}^* = K \bf{v_1}^*$ for some constant K. And since $\bf{u_1}^* = C_p \bf{w_1}^*$, this implies that $\frac{1}{K} C_p \bf{w_1}^* = \bf{v_1}^*$.
+2. $\frac{\partial L}{\partial \lambda} = 0$ suggests that the $\bf{u_1}$ is the unit vector $\bf{v_1}$ scaled by $\sqrt{1 - \bar{v}^2}$: $\bf{u_1} = \frac{\bf{v_1}}{\sqrt{1 - \bar{v}^2}}$. Therefore, $K = \frac{1}{\sqrt{1 - \bar{v}^2}}$
+
+So, putting everything together, 
+
+$$
+C_p \bf{w_1}^* \sqrt{1 - \bar{v}^2} = \bf{v_1}^*
+$$
+
+```{r}
+## Simulation
+n <- 20 ## rows for genes
+p <- 10 ## columns for samples
+
+## L2 norm
+norm <- function(x) {
+  sqrt(sum(x^2))
+}
+
+## Before row-centering
+X <- rexp(n*p, 3)
+X <- matrix(X, nrow = n, ncol = p)
+X.svd <- svd(X)
+v1 <- X.svd$v[,1]
+v1 <- v1/norm(v1)
+
+
+## After row-centering
+X.rc <- t(scale(t(X), center = T))
+X.rc.svd <- svd(X.rc)
+w1 <- X.rc.svd$v[,1]
+w1 <- u1/norm(u1)
+
+
+## Transformation:
+v.bar <- mean(v1)
+K <- sqrt(1 - v.bar^2)
+C_p = diag(p) -  rep(1, p) %*% t(rep(1, p)) / p
+
+u1 <- C_p %*% w1 * K
+norm(u1 - v1)
+
+
+par(mfrow = c(2,1))
+plot(v1, type = "l", main = "PC 1 before row-centering")
+plot(w1, type = "l", main = "PC 1 after row-centering")
+plot(u1, type = "l", main = "PC 1 recovered by transformation")
+```

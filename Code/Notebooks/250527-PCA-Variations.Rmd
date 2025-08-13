@@ -1,0 +1,317 @@
+---
+title: "250527-PCA-Variation"
+author: "Jingxin Wang"
+date: "2025-05-27"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Inspect Distributions of DNA Methylation Data
+```{r}
+library(tidyverse)
+seCount <-  readRDS(file = "../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+dim(seCount)
+
+sampleInfo <- read.csv("../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type[sampleInfo$sample_id %in% colnames(seCount)]
+
+
+cat("The range of all gene methylation is:", range(seCount))
+
+## Unconditional Distribution, all genes, all samples
+methyFlatten <- as.vector(seCount)
+hist(methyFlatten, main = "Unconditional distribution of DNA methylation",
+     xlab = "Methylation Percentage", ylab = "Frequency",
+     freq = F,
+     breaks  = 401)
+
+## Observation: Highly right skewed, zero inflated, resembles exponential distribution or chi-1 distribution
+## Methylation distribution shape differ by genes
+
+## Conditional distribution on genes
+set.seed(226)
+drawedRows <- sample(dim(seCount)[1], 6)
+drawedGenes <- rownames(seCount)[drawedRows]
+
+par(mfcol = c(2,3))
+for (gene in drawedGenes) {
+  hist(seCount[gene, ], main = paste("Methylation Percentage of gene", gene),
+     xlab = "Methylation", ylab = "Frequency",
+     freq = F,
+     breaks  = 101,
+     col = "cornflowerblue")
+}
+mtext("Conditional distribution of methylation on genes", side = 3, outer = T, cex = 1.5)
+
+## Conditional distribution on cancer type by randomly drawing samples
+## Straified sampling 2 participants by cancer types
+sampledTwoUnits <- sampleInfo %>% 
+  group_by(cancer_type) %>% 
+  sample_n(2) %>%
+  select(c(sample_id, cancer_type))
+
+cancerList <- sampleInfo$cancer_type %>% unique()
+seCountSamp <- seCount[,sampledTwoUnits$sample_id]
+
+par(mfcol = c(2,3))
+for (cancer in cancerList) {
+  idList <- sampleInfo %>% filter(cancer_type == cancer) %>% 
+      select(sample_id) %>% unlist()
+  
+  ## All gene methylation for this particular cancer
+  hist(seCount[, idList], 
+       main = cancer,
+       xlab = "Methylation", ylab = "Frequency",
+       freq = F,
+       breaks  = 101,
+       col = "cornflowerblue")
+}
+mtext("Conditional distribution of methylation on genes", side = 3, outer = T, cex = 1.5)
+
+## Observation: highly right skewed; distrobution pattern differ by genes
+## Observation: in some individuals, genes tend to be more highly expressed than others
+## example: TCGE-01-0113-32-A and TCGE-01-0180-30-A (even distribution shapes differ )
+
+## Conditional distribution by both gene and cancer type
+for (gene in drawedGenes) {
+  par(mfcol = c(3,3))
+  for (cancer in cancerList) {
+    idx <- sampleInfo %>% filter(cancer_type == cancer) %>% 
+      select(sample_id) %>% unlist()
+    x <- seCount[gene, idx]
+    n <- length(x)
+    hist(x, 
+         main = paste(cancer, ", gene:", gene, ",\n", "n =", n),
+         xlab = "Methylation", ylab = "Frequency",
+         freq = F,
+         xlim = c(0,20),
+         breaks =seq(0,100, 0.1),
+         col = "cornflowerblue")
+  }
+}
+```
+Observation: 
+
+1. In healthy normals, gene 18804 is methylated between 0 and 1.5, it seem to be hypermathylated in bladder cancer, lung cancer and breast cancer,it seems not hypomethylated in any kinds of cancer.
+2. In healthy normals, gene 7183 is methylated between 0 and 1.5, it seem to be hypermathylated in blood cancer, lung cancer and breast cancer,it seems to be hypomethylated in colorectal cancer.
+3. In healthy normals, gene 20139 is methylated between 0 and 3, it seem to be hypermathylated in blood, colorectal, breast, lung cancer, it seems not hypomethylated in any type.
+4. In healthy normals, gene 12201 is methylated between 0 and 3, it seem to be hypermathylated in blood, colorectal, pancreatic, breast, lung cancer,it seems not hypomethylated in any type.
+5. In healthy normals, gene 19170 is methylated between 0 and 4, it seem to be hypermathylated in blood, colorectal, pancreatic, bladder, breast, lung cancer,it seems not hypomethylated in any type.
+6. In healthy normals, gene 19170 is methylated between 0 and 4, it seem to be hypermathylated in blood, colorectal, pancreatic, bladder, breast, lung cancer,it seems not hypomethylated in any type.
+
+
+# 2. Box Plot Compare Distributions using the Five Number Summary
+
+```{r}
+par(mfcol = c(3,3))
+for (gene in drawedGenes) {
+  idx <- sampleInfo %>% filter(cancer_type == cancer) %>% 
+    select(sample_id) %>% unlist()
+
+  methyByType <- data.frame(
+    "type"= sampleInfo$cancer_type,
+    "methyl" = seCount[gene, ]
+  )
+  
+  p <- ggplot(data = methyByType) + 
+    geom_boxplot(aes(x = type, y = methyl, fill = factor(type)))+
+    xlab("Cancer") + ylab("Methylation") +
+    ggtitle(paste("gene:", gene, "n =", n))+
+    theme(axis.text.x = element_text(angle = 45))
+  print(p)
+}
+```
+
+1. 18804: breast, colorectal, lung cancers
+2. 7183: bladder, blood, breast, colorectal
+3. 20139: bladder, blood, breast, colorectal, lung
+4. 12201: everything is hypermethylated. Blood, breast, colorectal, lung cancers are more hypermethylated than bladder, pancreatic, and renal cancers.
+5. 19170: same as 12201
+6. 5344: blood and colorectal cancers are hypomethylated
+
+# 3. Unscaled vs. Scaled PCA
+Let X be the mathylation matrix, where rows are samples and columns are genes. Then $X \in \mathbb{R}^{24418 * 378}$. The given matrix is $X^T$, whose rows are samples and columns are genes. If we apply `scale(X, center = T, scale = T)` to the given data matrix X, then it is equialent to apply row centering and row scaling to X; that is, methylations of the same subject are standardized using the that subject's information. If we apply `scale(X, center = T, scale = T)` to $X^T$, then methylations of the same gene across different samples standardized using distribution of that gene in different individuals.
+
+
+```{r}
+pcaCombo <- function(X) {
+  PCA <- prcomp(X,  scale = F, rank. = min(dim(X)))
+
+  ## Compute Scree Plot
+  totalVar <- sum(PCA$sdev^2)
+  varExpl <- PCA$sdev^2/totalVar
+  
+  # PCs that explain > 1% of variances
+  minPC <- which(varExpl > 0.01)
+  percPCmin <- varExpl[minPC]
+  scree <- data.frame(
+    "k" = 1:min(dim(seCount)),
+    "perc" = varExpl
+  )
+  
+  limitPC <- which.min(-diff(percPCmin, 1) < 0.03)
+  
+  
+  A <- ggplot(scree) + 
+    geom_line(aes(x = k, y = perc, 
+                  color = adjustcolor("red", alpha = 0.4)), 
+              stat = "identity")+
+    geom_hline(linetype = "dashed", yintercept = percPCmin[limitPC]) + 
+    geom_vline(linetype = "dashed", xintercept = limitPC) +
+    xlab("# of PCs") + 
+    ylab("Proportion of variance explained")+
+    ggtitle("Scree Plot") + 
+    theme(legend.position = "none") 
+  
+  ## Compute PC1 vs PC 2 Scatter Plot
+  Z2 <- X %*% PCA$rotation[,1:2]
+  Z2 <- data.frame(Z2)
+  colnames(Z2) <- c("PC1", "PC2")
+  
+  Z2$cancerType <- cancerTypes
+  B <- ggplot(Z2) + 
+    geom_point(aes(x = PC1, y = PC2, color = cancerTypes, alpha = 0.3))+
+    ggtitle("PC 1,2 Scatter Plot")+
+    scale_color_brewer(palette = "Paired")
+  
+  ## PC 1 and PC 2 Trace Plot
+  V2 <- data.frame(PCA$rotation[,1:2])
+  colnames(V2) <- c("PC1", "PC2")
+  V2$k <- 1:dim(V2)[1]
+  
+  C <- ggplot(V2) + 
+    geom_bar(aes(x = k, y = PC1), color = adjustcolor("red", alpha = 0.4),  stat = "identity")+
+    geom_hline(linetype = "dashed", yintercept = 0.05) +
+    geom_hline(linetype = "dashed", yintercept = -0.05) +
+    xlab("Genes") + 
+    ylab("PC 1") + 
+    theme(legend.position = "none")+
+    ggtitle("PC 1 Trace Plot")
+  
+  D <- ggplot(V2) + 
+    geom_bar(aes(x = k, y = PC2), color = adjustcolor("blue", alpha = 0.4), stat = "identity")+
+    geom_hline(linetype = "dashed", yintercept = 0.05) +
+    geom_hline(linetype = "dashed", yintercept = -0.05) +
+    xlab("Genes") + 
+    ylab("PC 2") + 
+    theme(legend.position = "none") + 
+    ggtitle("PC 2 Trace Plot")
+  
+  cowplot::plot_grid(plotlist = list(A,B,C,D),
+                     nrow = 2, ncol = 2,
+                     labels = c("A", "B", "C", "D")) %>%
+    print()
+  
+  return(V2$PC1)
+
+}
+
+## Unscaled, uncentered
+PC1_uncented = pcaCombo(t(seCount))
+## Unscaled, but centered
+PC1_scaledonly = pcaCombo(t(scale(seCount, center = T)))
+## Scaled every Sample
+PC1_std = pcaCombo(t(scale(seCount, center = T, scale = T)))
+```
+
+**Observations**:
+
+1. Before scaling, PC 1 has only negative components, and most loading values have roughly the same magnitudes. After scaling, PC 1 has positive and negative components, and more spikes shows up, meaning that some genes explain dramatically more variances than others.
+2. In the space spanned by PC 1 and P2, points (represent samples) are distributed in funnel shapes. Before scaling, points tend to collapse together; after scaling, points are more spread out.
+
+**Investigate Why**:
+Let n be the sample size, and p be the number of gene methlylation measures. Let 
+
+$$
+X = \begin{bmatrix} 
+-\bf x_1 -\\
+-\bf x_2 -\\
+...\\
+-\bf x_n -\\
+\end{bmatrix}
+$$
+where each $\bf x_i \in \mathbb{R}^p$. Before centering, every $x_{ij}$ is non-negative, which means that $\x_i$ is constrained to the cone of $\{x \in R^p|\bf x \geq \bf 0 \}$. However, PCA is an unconstrained oporation.
+
+Let $Z$ be the row centered version of X, and C be the row centering operator, $C_p = I_{p*p} - \frac{1}{p} \mathbb{1}_p \mathbb{1}_p$, then $Z = X C_p$. PCA is to find eigen vectors of the variance-covariance matrix of X, denoted by S. Before centering, we only need to apply column centering to X. Denote the column centering operator by $C_n =  I_{n*n} - \frac{1}{n} \mathbb{1}_n \mathbb{1}_n$, and $S =\frac{1}{n-1} (C_n X)^T (C_n X) = \frac{1}{n-1} X^T C_n X$, because $C_n$ is an orthogonal matrix. If X is row centered, then $S^* = \frac{1}{n-1} (Z C_p)^T (Z C_p) = \frac{1}{n-1} C_p Z^T Z C_p = \frac{1}{n-1} C_p X^T C_n X C_p$.
+
+PC 1 $\bf v_1$ is the first eigen vector of S, it solves the problem:
+$$
+\text{max } \{\bf v_1^T S \bf{v_1} \} \text{   s.t   } \|v_1 \|_2 = 1
+$$ 
+
+Before row centering, the problem is formulated as $\text{max } \{\bf v_1^T (\frac{1}{n-1} X^T C_n X) \bf{v_1} \} \text{   s.t   } \|v_1 \|_2 = 1$. $S v_1 = \lambda_1 v_1$ implies that $\frac{1}{n-1} (X^T C_n X) v_1 = \lambda v_1$.
+
+After the row centering, the problem is formulated as $\text{max } \{\bf v_1^T (\frac{1}{n-1} C_p X^T C_n X C_p) \bf{v_1} \} \text{   s.t   } \|v_1 \|_2 = 1$. Let $\bf{u_1} = C_p \bf{v_1}$, the problem can be reformulated as $\text{max } \{\bf{u_1}^t (\frac{1}{n-1} X^T C_n X) \bf{u_1} \} \text{   s.t   } \|\bf{u_1} \|_2 = 1$. The solution satisfies $\frac{1}{n-1} (X^T C_n X) \bf{u_1} = \lambda_1 \bf{u_1}$. Therefore, $\bf{u_1} = C_p \bf{v_1}$ links the solution of the uncentered problem $v_1$ and the solution of the centered problem $u_1$.
+
+
+We can check by the following code:
+```{r}
+n <- dim(seCount)[2]; p <- dim(seCount)[1]
+# Cn <- diag(n) - rep(1, n) %*% t(rep(1, n))/n
+Cp <- diag(p) - rep(1, p) %*% t(rep(1, p))/p
+
+# X <- t(seCount)
+# S <- cov(scale(X, center = TRUE))
+# S_rctr <- cov(scale(t(scale(t(X), center = TRUE)), center = TRUE))
+# 
+# v1 <- eigen(S)$vector[,1]
+# u1 <- eigen(S_rctr)$vector[,1]
+# w1 <- Cp %*% v1
+# 
+
+v1 = PC1_uncented
+u1 = Cp %*% v1
+w1 = PC1_scaledonly
+pcFrame <- data.frame(
+  "k" = seq(1, length(v1)),
+  "v1" = v1,
+  "u1" = u1,
+  "w1" = w1
+)
+
+A <- ggplot(pcFrame) + 
+    geom_bar(aes(x = k, y = v1), color = adjustcolor("red", alpha = 0.4),  stat = "identity")+
+    geom_hline(linetype = "dashed", yintercept = 0.05) +
+    geom_hline(linetype = "dashed", yintercept = -0.05) +
+    xlab("Genes") + 
+    ylab("PC 1") + 
+    theme(legend.position = "none")+
+    ggtitle("PC 1 in row-uncentered case")
+
+B <- ggplot(pcFrame) + 
+    geom_bar(aes(x = k, y = u1), color = adjustcolor("blue", alpha = 0.4),  stat = "identity")+
+    geom_hline(linetype = "dashed", yintercept = 0.05) +
+    geom_hline(linetype = "dashed", yintercept = -0.05) +
+    xlab("Genes") + 
+    ylab("PC 1") + 
+    theme(legend.position = "none")+
+    ggtitle("PC 1 after direct row centering transformation")
+
+C <- ggplot(pcFrame) +
+    geom_bar(aes(x = k, y = w1), color = adjustcolor("purple", alpha = 0.4),  stat = "identity")+
+    geom_hline(linetype = "dashed", yintercept = 0.05) +
+    geom_hline(linetype = "dashed", yintercept = -0.05) +
+    xlab("Genes") +
+    ylab("PC 1") +
+    theme(legend.position = "none")+
+    ggtitle("PC 1 produced by row-centered matrix")
+
+cowplot::plot_grid(plotlist = list(A, B, C), 
+                   labels = c("A", "B", "C"), 
+                   nrow = 3, ncol = 1)
+```
+
+
+
+```{r}
+## Other scaling and centering strategy
+
+## Unscaled, but centered
+# pcaCombo(scale(t(seCount), center = T))
+# ## Scaled every Sample
+# pcaCombo(scale(t(seCount), center = T, scale = T))
+```
+

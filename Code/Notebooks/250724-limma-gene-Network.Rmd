@@ -1,0 +1,191 @@
+---
+title: "250721-Classical-PCA-Network-Pipeline"
+author: "250539-PCA-Next-Step"
+date: "2025-07-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Data
+```{r fig.height=4, message=FALSE}
+## Function Definition
+source("pcaCombo.R")
+
+## Load  Methylation Data
+library(tidyverse)
+X.T <-  readRDS(file = "../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+
+## Load Cancer Types
+sampleInfo <- read.csv("../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type[sampleInfo$sample_id %in% colnames(X.T)]
+
+## Log Transformation and save
+logX <- t(log(X.T + 0.1)) # 378 * 24418 matrix
+write.csv(logX, file = "../Data/X_after_log.csv")
+write.table(cancerTypes, file = "../Data/cancerTypes.txt", row.names = F)
+```
+
+## `limma` Select Significantly Differentiated Genes
+
+```{r}
+# logX <- read.csv("../Data/X_after_log.csv")
+cancerTypes <- read.csv("../Data/cancerTypes.txt")
+groups <- ifelse(cancerTypes$x=="Normal", 0, 1)
+designMat <- model.matrix(~groups)
+
+library(limma)
+logX <- t(log2(X.T + 0.1))
+fit <- lmFit(t(logX), design = designMat)
+fit <- eBayes(fit)
+
+## Identify DMR genes using two thresholds:
+## log2(FC) >  1, -log(p-value) > 0.05
+testRes <- topTable(fit, adjust = "BH", number = Inf)
+ggplot(data = testRes, aes(x = logFC, y = -log10(adj.P.Val)))+
+  geom_point()+
+  coord_cartesian(xlim = c(-4, 4), ylim = c(0,25))
+  
+sum(testRes$logFC > 1)
+
+DMRs <- testRes %>% filter(adj.P.Val > 0.05 & abs(logFC) > 1) %>% rownames()
+volcanoplot(fit)
+```
+
+
+## Classical PCA and Select Top 200 Genes
+```{r}
+## Optional: reload the data, can be commented out
+# logX <- read.csv("../Data/X_after_log.csv")
+# cancerTypes <- read.csv("../Data/cancerTypes.txt")
+
+## Classical PCA and get the first PC
+PC_log = pcaCombo(logX)
+PC1 <- PC_log[,1]
+
+## Order the PC1 and get the first 200 gene codes
+top200indx <- order(abs(PC1), decreasing = T)[1:200]
+top200genes <- colnames(logX)[top200indx]
+
+## Visualize the distribution of the PC1
+hist(PC1, main = "Frequency Distribution of PC 1", col = "pink")
+```
+
+## UMAP on Top 200 Genes
+```{r}
+library(umap)
+source("umap.R")
+umap.defaults$n_neighbors = 5
+umap.defaults$min_dist = 0.2
+umap.defaults$n_components = 2
+umap.input <- logX[, top200genes]
+
+UMAP.2d(umap.input, cancerTypes)
+```
+
+## 3D Visualization
+```{r}
+source("score3D.R")
+
+## 3D Visualization of Scores Derived from All Genes
+frame3D <- makeScore3D(logX, PC_log[,1:3], cancerTypes)
+score3D(frame3D, title = "Score Scatter Plot of log X", "Types")
+```
+
+```{r}
+## Build 3D UMAP from the Top 200 Genes
+
+## 3D Visualizations of Scores Derived from the Top 200 Genes
+umap.defaults$n_neighbors = 5
+umap.defaults$min_dist = 0.2
+umap.defaults$n_components = 3
+
+UMAP.3d(logX[, top200genes], cancerTypes)
+```
+## Glasso on the Top 200 Genes
+```{r}
+library(glasso)
+
+S <- var(logX[, top200genes]) ## Covariance matrix of the top 200 genes
+glassoRes <- glasso(S, rho = 0.01,
+           nobs = nrow(logX),
+           maxit = 100)
+
+## Plot the heatmap and the graph
+# source("iris_heatmap.R")
+# heatmap(glassoRes$wi)
+
+library(igraph)
+weightMat <- glassoRes$wi
+diag(weightMat) <- 0
+threshold <- 0.05
+weightMat[abs(weightMat) < threshold] <- 0
+
+sparseCovInvGraph <-graph_from_adjacency_matrix(weightMat, 
+                                                mode = "undirected",
+                                                weighted = T)
+layout_nice <- layout_nicely(sparseCovInvGraph)
+plot.igraph(sparseCovInvGraph, 
+            vertex.size=3, vertex.label=NA, 
+             layout = layout_nice, 
+             main = paste("Inverse Covariance Graph, Abs Threshold =", 
+                          threshold))
+```
+
+## Saving Results
+```{r}
+save(umap.output, glassoRes, sparseCovInvGraph, file = "../Data/pipelineCache.Rdata")
+
+load("../Data/pipelineCache.Rdata")
+```
+
+## Bell-shaped Corr Distribution Near 0
+```{r}
+geneSamp <- sample(colnames(logX), 200)
+
+S <- var(logX[, geneSamp]) ## Covariance matrix of the top 200 genes
+glassoRes <- glasso(S, rho = 0.1,
+           nobs = nrow(logX),
+           maxit = 100)
+penalizedCov <- glassoRes$w
+penalizedCorrelation <- penalizedCov / sqrt(outer(diag(penalizedCov), diag(penalizedCov)) )
+
+
+par(mfrow = c(2,2))
+hist(cor(logX[, top200dmrs]), main = "Distribution of correlations before penalty",
+breaks = "Scott", col = "pink")
+
+hist(S, main = "Distribution of covariance before penalty", col = "pink", breaks = "Scott")
+
+hist(glassoRes$w, main = "Distribution of penalized covariance",
+breaks = "Scott", col = "pink")
+
+hist(penalizedCorrelation, main = "Distribution of penalized correlations", col = "pink", breaks = "Scott")
+
+
+hist(solve(S), main = "Distribution of nverse penalized covariance", col = "pink", breaks = "Scott")
+
+hist(solve(glassoRes$w), main = "Distribution of inverse penalized covariance", col = "pink", breaks = 200)
+```
+
+```{r}
+w_inv <- solve(glassoRes$w)
+hist(w_inv, main = "Distribution of inverse penalized covariance", col = "pink", breaks = 200)
+
+
+## After normalizing
+w_inv_diag <- diag(w_inv)
+w_inv_std <- w_inv / sqrt(outer(w_inv_diag, w_inv_diag))
+hist(w_inv_std, main = "Distribution of standardized inverse penalized covariance", col = "pink", breaks = 200)
+
+off_diag <- upper.tri(w_inv_std)
+off_diag <- w_inv_std[off_diag]
+hist(off_diag, main = "Partial Correlation")
+
+off_diag <- upper.tri(w_inv)
+off_diag <- w_inv[off_diag]
+
+hist(off_diag, main = "Inverse of Estimated covariance Matrix")
+```
