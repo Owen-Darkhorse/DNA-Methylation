@@ -1,0 +1,308 @@
+---
+title: "250721-Classical-PCA-Network-Pipeline"
+author: "250539-PCA-Next-Step"
+date: "2025-07-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Objectives of This Attempt**
+
+1. Verify if the mean value of non-zero part of methylation data has effect on partial correlations, including Pearson and Spearman Partial Correlation.
+2. Explore the implication of the gap between zeros and minimum non-zero values.
+
+
+**Method**:
+
+1. Calculation with Centering with Means of Non-Zero Parts
+  - Calculate Pearson and Spearman Correlation on Original, Square Rooted, Log Transformed, and INT transformed data
+  - Compare correlation heatmaps
+2. Calculation without Centering (Not Centering)
+  - Subtract the mean of non-zero values from non-zero entries (centering with means) versus no centering
+  - Repeat calculation and plotting in part 1
+
+For each transformation, take the absolute difference between calculations with centering with means of non-zero parts and not centering. Plot heatmaps of difference graphs.
+
+
+## Loading Data
+```{r fig.height=4, message=FALSE}
+## Load  Methylation Data
+library(tidyverse)
+X.T <-  readRDS(file = "../../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+```
+
+## Apply Transformations on Randomly Selected 5 Rows
+
+```{r}
+## Sample 5 DMRs
+set.seed(226)
+sampDMR <- sample(rownames(X.T), 5)
+original.X <- t(X.T[sampDMR, ])
+
+## Box-cox Transformation
+source("../R-scripts/IVT.R") ## INT mapps empirical quantiles to normal(0,1) quantiles
+
+## Boxcox applies monotonic transform
+BoxCox <- function(X, lambda) {
+  apply(X, MARGIN = 2, FUN = function(x) {
+    if (lambda == 0) {
+      log(x+1e-6)
+    } else {
+      (x^lambda - 1)/lambda
+    }
+  })
+}
+
+### Root Transform
+root.X <- BoxCox(original.X, 0.5)
+
+### Log Transform
+log.X <- BoxCox(original.X, 0)
+
+
+## IVT Transformation
+ivt.X <- IVT(original.X, 0.5)
+```
+
+
+```{r warning=FALSE}
+## plot distributions of methylations under different transformations, 
+## One row per DMR
+par(mfrow = c(2, 4))
+for (i in 1:5) {
+  hist(original.X[,i], breaks = 100, main = "Original", xlabs = 'NA', ylabs = 'NA')
+  hist(root.X[,i], breaks = 100, main = "Root", xlabs = 'NA', ylabs = 'NA')
+  hist(log.X[,i], breaks = 100, main = "Log", xlabs = 'NA', ylabs = 'NA')
+  hist(ivt.X[,i], breaks = 100, main = "IVT", xlabs = 'NA', ylabs = 'NA')
+}
+```
+**Observations**
+
+1. The gap between zeros and non-zeros widens as the power transformation `lambda` power approaches to 0. 
+2. Among power transformations, log effectively transforms non-zero part of variables to be symmetrically distributed near 0.
+3. After IVT, the non-zero part of the distribution is close to normally distributed; however, the distribution is truncated normal.
+
+## Non-zero mean values effects to Corr
+```{r}
+library(ppcor)
+library(pheatmap)
+
+non_min_demean <- function(X) {
+  ## For each column, subtract mean value from nonzero values
+  ## Keep zero values the same
+  apply(X, MARGIN = 2, FUN = function(x) {
+    non_zero_indx <- x > min(x)
+    non_zero_mean <- mean(x[x > 0])
+    x[non_zero_indx] = x[non_zero_indx] - non_zero_mean
+    x
+  }, simplify = TRUE)
+}
+
+original.X.nc <- original.X ## Non-zero part not centered
+original.X.c <- non_min_demean(original.X.nc)
+
+pearson_original_nc <- pcor(original.X.nc, method = "pearson")
+spearman_original_nc <- pcor(original.X.nc, method = "spearman")
+
+pearson_original_c <- pcor(original.X.c, method = "pearson")
+spearman_original_c <- pcor(original.X.c, method = "spearman")
+
+pheatmap(abs(pearson_original_c$estimate -
+               pearson_original_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, original pearson Corr Diff")
+pheatmap(abs(spearman_original_c$estimate -
+               spearman_original_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, original spearman Corr Diff")
+
+```
+```{r}
+root.X.nc <- root.X ## Non-zero part not centered
+root.X.c <- non_min_demean(root.X.nc)
+
+pearson_root_nc <- pcor(root.X.nc, method = "pearson")
+spearman_root_nc <- pcor(root.X.nc, method = "spearman")
+
+pearson_root_c <- pcor(root.X.c, method = "pearson")
+spearman_root_c <- pcor(root.X.c, method = "spearman")
+
+pheatmap(abs(pearson_root_c$estimate -
+               pearson_root_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, root pearson Corr Diff")
+pheatmap(abs(spearman_root_c$estimate -
+               spearman_root_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, root spearman Corr Diff")
+```
+
+```{r}
+log.X.nc <- log.X ## Non-zero part not centered
+log.X.c <- non_min_demean(log.X.nc)
+
+pearson_log_nc <- pcor(log.X.nc, method = "pearson")
+spearman_log_nc <- pcor(log.X.nc, method = "spearman")
+
+pearson_log_c <- pcor(log.X.c, method = "pearson")
+spearman_log_c <- pcor(log.X.c, method = "spearman")
+
+pheatmap(abs(pearson_log_c$estimate -
+               pearson_log_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, log pearson Corr Diff")
+try(
+  pheatmap(abs(spearman_log_c$estimate -
+               spearman_log_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, log spearman Corr Diff")
+)
+```
+
+```{r}
+ivt.X.nc <- ivt.X ## Non-zero part not centered
+ivt.X.c <- non_min_demean(ivt.X.nc)
+
+pearson_ivt_nc <- pcor(ivt.X.nc, method = "pearson")
+spearman_ivt_nc <- pcor(ivt.X.nc, method = "spearman")
+
+pearson_ivt_c <- pcor(ivt.X.c, method = "pearson")
+spearman_ivt_c <- pcor(ivt.X.c, method = "spearman")
+
+pheatmap(abs(pearson_ivt_c$estimate -
+               pearson_ivt_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, ivt pearson Corr Diff")
+pheatmap(abs(spearman_ivt_c$estimate -
+               spearman_ivt_nc$estimate),  
+         cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", 
+         main = "Centered vs uncentered, ivt spearman Corr Diff")
+```
+
+**Observation**
+1. Exclusion of zeros affect Pearson partial correlation more than Spearman partial correlation.
+2. Affected DMR pairs were different between Pearson and Spearman
+
+
+
+## Correlations Change Between Transformations (without Mean Removed)
+
+```{r}
+pearson_original_pcor <- pcor(original.X, method = "pearson")
+spearman_original_pcor <- pcor(original.X, method = "spearman")
+
+pearson_root_pcor <- pcor(root.X, method = "pearson")
+spearman_root_pcor <- pcor(root.X, method = "spearman")
+
+pearson_log_pcor <- pcor(log.X, method = "pearson")
+spearman_log_pcor <- pcor(log.X, method = "spearman")
+
+pearson_ivt_pcor <- pcor(ivt.X, method = "pearson")
+spearman_ivt_pcor <- pcor(ivt.X, method = "spearman")
+```
+
+```{r}
+## Taking differences in partial correlations
+pearson_diff_org_root <- abs(pearson_root_pcor$estimate - pearson_original_pcor$estimate)
+pearson_diff_org_log <- abs(pearson_log_pcor$estimate - pearson_original_pcor$estimate)
+pearson_diff_org_ivt <- abs(pearson_ivt_pcor$estimate - pearson_original_pcor$estimate)
+
+spearman_diff_org_root <- abs(spearman_root_pcor$estimate - spearman_original_pcor$estimate)
+spearman_diff_org_log <- abs(spearman_log_pcor$estimate - spearman_original_pcor$estimate)
+spearman_diff_org_ivt <- abs(spearman_ivt_pcor$estimate - spearman_original_pcor$estimate)
+
+## Plotting Corr Differences before and after transformations
+par(mfrow = c(1,3))
+pheatmap(pearson_diff_org_root,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs Root, Pearson Corr Diff")
+pheatmap(pearson_diff_org_log,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs Log, Pearson Corr Diff")
+pheatmap(pearson_diff_org_ivt,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs IVT, Pearson Corr Diff")
+
+
+try({
+  pheatmap(spearman_diff_org_root,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs Root, spearman Corr Diff")
+  pheatmap(spearman_diff_org_log,  cluster_rows = F,  cluster_cols = F,
+           angle_col = "315", main = "Original vs Log, spearman Corr Diff")
+  pheatmap(spearman_diff_org_ivt,  cluster_rows = F,  cluster_cols = F,
+           angle_col = "315", main = "Original vs IVT, spearman Corr Diff")
+})
+```
+
+**Observations**:
+
+1. Pearson partial correlation witnessed noticeable changes after power and IVT transformations, whereas Spearman didn't due to monotonity in the transformations.
+2. In the pearson partial corr, the maximum corr difference range from 0.15 to 0.3, which is big. And such a big change consistently showed up in the same DMR pair.
+
+
+## Correlations Change Between Transformations (with Mean Removed)
+
+```{r}
+## Exclude zeros from calculations
+original.X.c <- non_min_demean(original.X)
+root.X.c <- non_min_demean(root.X)
+log.X.c <- non_min_demean(log.X)
+ivt.X.c<- non_min_demean(ivt.X)
+```
+
+```{r}
+## Repeat the same calculation procedure as before
+pearson_original_pcor <- pcor(original.X.c, method = "pearson")
+spearman_original_pcor <- pcor(original.X.c, method = "spearman")
+
+pearson_root_pcor <- pcor(root.X.c, method = "pearson")
+spearman_root_pcor <- pcor(root.X.c, method = "spearman")
+
+pearson_log_pcor <- pcor(log.X.c, method = "pearson")
+spearman_log_pcor <- pcor(log.X.c, method = "spearman")
+
+pearson_ivt_pcor <- pcor(ivt.X.c, method = "pearson")
+spearman_ivt_pcor <- pcor(ivt.X.c, method = "spearman")
+
+## Difference Calculation
+pearson_diff_org_root <- abs(pearson_root_pcor$estimate - pearson_original_pcor$estimate)
+pearson_diff_org_log <- abs(pearson_log_pcor$estimate - pearson_original_pcor$estimate)
+pearson_diff_org_ivt <- abs(pearson_ivt_pcor$estimate - pearson_original_pcor$estimate)
+
+spearman_diff_org_root <- abs(spearman_root_pcor$estimate - spearman_original_pcor$estimate)
+spearman_diff_org_log <- abs(spearman_log_pcor$estimate - spearman_original_pcor$estimate)
+spearman_diff_org_ivt <- abs(spearman_ivt_pcor$estimate - spearman_original_pcor$estimate)
+
+## Plotting Corr Differences before and after transformations
+pheatmap(pearson_diff_org_root,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs Root, Pearson Corr Diff")
+pheatmap(pearson_diff_org_log,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs Log, Pearson Corr Diff")
+pheatmap(pearson_diff_org_ivt,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs IVT, Pearson Corr Diff")
+
+
+try({
+  pheatmap(spearman_diff_org_root,  cluster_rows = F,  cluster_cols = F,
+         angle_col = "315", main = "Original vs Root, spearman Corr Diff")
+  pheatmap(spearman_diff_org_log,  cluster_rows = F,  cluster_cols = F,
+           angle_col = "315", main = "Original vs Log, spearman Corr Diff")
+  pheatmap(spearman_diff_org_ivt,  cluster_rows = F,  cluster_cols = F,
+           angle_col = "315", main = "Original vs IVT, spearman Corr Diff")
+})
+```
+Similar conclusion as without centering the non-zero part
+
+## Conclusions
+
+1. Pearson partial correlation is more sensitive to transformation method and exclusion of zeros.
+2. With correlation chosen, the change in the correlation before and after transformation is consistent across transformation.
+3. Power transformation widens the gap, while IVT doesn't.

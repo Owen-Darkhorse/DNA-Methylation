@@ -1,0 +1,189 @@
+---
+title: "250721-Classical-PCA-Network-Pipeline"
+author: "250539-PCA-Next-Step"
+date: "2025-07-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Data
+```{r fig.height=4, message=FALSE}
+## Load  Methylation Data
+library(tidyverse)
+X.T <-  readRDS(file = "../../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+
+## Load Cancer Types
+sampleInfo <- read.csv("../../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type
+```
+
+```{r}
+source("../R-scripts/IVT.R")
+
+## IVT Transformation
+ivt.X <- IVT(t(X.T), 0.2)
+
+## Distribution of a sample of DMRs
+dmrSubset <- sample(colnames(ivt.X), 4)
+
+par(mfrow = c(2,2))
+for (j in dmrSubset) {
+  hist(ivt.X[, j], main = paste(j, "after INT"), breaks = "Scott")
+}
+
+## Save Data
+save(ivt.X, file="../../Data/ivtData.RDS")
+```
+
+## Limma Filtering Genes using B-statistics
+```{r}
+load("../../Data/ivtData.RDS")
+groups <- ifelse(cancerTypes=="Normal", 0, 1)
+designMat <- model.matrix(~groups)
+
+library(limma)
+# logX <- t(log2(X.T + 0.1))
+fit <- lmFit(t(ivt.X), design = designMat)
+fit <- eBayes(fit)
+
+## Identify DMR genes using two thresholds:
+## log2(FC) >  1, -log(p-value) > 0.05
+testRes <- topTable(fit, adjust = "BH",
+                    sort.by = "B",
+                    number = Inf)
+## B-statistics
+Q95B <- quantile(testRes$B, probs = c(0.95))
+hist(testRes$B, main = "Distribution of B statistics", 
+     freq = F)
+abline(v = Q95, lty = 2)
+text(paste("95% quantile:\n", Q95B), x = Q95B, y = 0.05)
+
+## T-statistics
+Q95T <- quantile(testRes$t, probs = c(0.95))
+hist(testRes$t, 
+     main = "Distribution of moderated t statistics", 
+     freq = F)
+abline(v = Q95T, lty = 2)
+text(paste("95% quantile:\n", Q95T), x = Q95T, y = 0.05)
+
+## Volcano plot
+ggplot(data = testRes, aes(x = logFC, y = -log10(adj.P.Val)))+
+  geom_point()+
+  coord_cartesian(xlim = c(0, 8), ylim = c(0,25))+
+  labs(title = "Volcano plot of hypermethylated genes")+
+  geom_hline(yintercept =-log10(0.01), linetype = "dashed")+
+  geom_vline(xintercept = 1, linetype = "dashed")
+```
+
+## Glasso Running Time on Different rho
+
+```{r}
+# load("../Data/preprocData.RDS")
+# load("../Output/PCA_results.RDS")
+library(glasso)
+library(iDINGO)
+library(igraph)
+library(tidygraph)
+library(ggraph)
+library(cowplot)
+
+
+## Select genes with top 5% DMRs in B-stat
+topdmrsbyB <- filter(testRes, B > Q95B) %>% rownames()
+paste("There are", length(topdmrsbyB), "DMRs in the 5% region")
+
+## Compute covariance and inverse for healthy control
+S <- cov(ivt.X[groups==0, topdmrsbyB]) # + 0.1 * diag(topdmrsbyB)## Add 0.1 diagonal to make the matrix invertible
+S.inv <- solve(S)
+
+## Select optimal rho
+n = sum(groups==0)
+rhoList <- 10^seq(-5,2, 0.5)
+time.diff.healthy <- data.frame("rho" = c(), "Elapsed Time" = c())
+ebic.healthy <- data.frame("rho" = c(), "Extended BIC" = c())
+
+for (rho in rhoList) {
+  cat("rho = ", rho, ", starts -----------------")
+  
+  ## Timing the glasso step for different rho's
+  time.begin <- Sys.time()
+  glassoRes <- glasso(S, rho = rho,
+                      nobs = n,
+                      maxit = 100)
+  time.end <- Sys.time()
+  time.elapsed <- time.end - time.begin
+  time.diff.healthy <- rbind(time.diff.healthy, c(rho,time.elapsed))
+  
+  ## Compute eBIC as the loss function
+  ebic <- extendedBIC(0.5, glassoRes$wi, S, n)
+  ebic.healthy <- rbind(ebic.healthy, c(rho, ebic))
+  
+  cat("rho = ", rho, ", finishes -----------------")
+}
+
+source("../R-scripts/graphMaker.R")
+source("../R-scripts/graphMeasures.R")
+
+## Graph from partial correlations from exact Precision Matrix
+exactGraph <- parCorr_from_precision(S.inv, rho, n)
+
+## Graph from partial correlation matrix (with optimal penalization)
+rho = 0.1
+glassoRes <- glasso(S, rho = rho,
+                    nobs = n,
+                    maxit = 100)
+penalGraph <- parCorr_from_precision(glassoRes$wi, rho, n)
+
+
+## Graph Comparison: Global Level
+all_global_msr <- function(g) {
+  deg_vec <- nodal_strength(g)
+  c(
+  global_strength(deg_vec),
+  global_efficiency(g),
+  char_path_length(g),
+  modularity_score(g))
+}
+
+global_comparison <- data.frame(
+  "Exact" = all_global_msr(penalGraph),
+  "Penalized" = all_global_msr(penalGraph)
+)
+rownames(global_comparison) <- c(
+  "Strength", 
+  "Efficiency", 
+  "Character Path Length", 
+  "Modularity"
+)
+
+global_comparison
+
+## Graph Comparison: Plotting
+EX <- ggraph(exactGraph, 
+         layout = 'linear', circular = TRUE) + 
+    geom_node_point()+
+    geom_edge_arc(aes(colour = weight)) + 
+    scale_edge_colour_gradient(low="grey",
+                                high="black",
+                                limits = c(0, 0.4))+
+    coord_fixed()+
+    labs(subtitle = paste("rho = 1,", "Healthy"),
+         colour = "Pcorr")
+
+PE <-  ggraph(penalGraph, 
+         layout = 'linear', circular = TRUE) + 
+    geom_node_point()+
+    geom_edge_arc(aes(colour = weight)) + 
+    scale_edge_colour_gradient(low="grey",
+                                high="black",
+                                limits = c(0, 0.4))+
+    coord_fixed()+
+    labs(subtitle = paste("rho = 1,", "Healthy"),
+         colour = "Pcorr")
+plot_grid(plotlist = list(EX, PE), nrow = 1, ncol = 2)
+
+
+```

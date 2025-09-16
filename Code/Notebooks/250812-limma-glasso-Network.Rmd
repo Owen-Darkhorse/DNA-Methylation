@@ -276,6 +276,11 @@ load("../Data/pipelineCache.Rdata")
 
 hist(glassoRes$w, main = "distribution of penalized covariance matrix",
      breaks = "Scott", col = "pink")
+```
 
+```{r}
+hist(logX[,1], main = "Distribution of Log transformation")
 
+source("../R-scripts/IVT.R")
+hist(IVT.column(logX[,1], 0.5), main = "Distribution of IVT transformation")
 ```
