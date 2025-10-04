@@ -1,0 +1,64 @@
+---
+title: "250919-Application of Glasso on INT-Transformed Zero-Inflated Data"
+author: "Jingxin Wang"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. Last Time
+
+1. Pearson partial correlation is more sensitive to transformation than Spearman and Kendall
+2. Normality satisfied after INT transformation.
+3. We can experiment Glasso on INT data, and compare the result with network given by Spearman and Kendall
+4. Multiple test correction for p-value based edge selection should be tested.
+
+
+## 1. Today
+
+1. Application of Glasso on zero-inflated data before and after INT transformation
+  - Compare the networks before and after transformations
+2. Benchmark with Hypothesis Testing
+  - Assumptions check for Benjamin-Hotchberg and Benjamin-Yekutielli Test, do they work for correlation of the current type?
+  
+## 2. Loading Data and Packages
+
+```{r message=FALSE}
+## Load packages
+library(HurdleNormal)
+library(tidyverse)
+library(ggplot2)
+library(cowplot)
+library(igraph)
+library(tidygraph)
+library(ggraph)
+
+## Load customized functions
+source("../R-scripts/INT.R")
+
+## Load and Sample Methylation Data
+X.T <-  readRDS(file = "../../Data/Common_pan_cancer_hyper_bins_adjusted_and_normalized_cnt_in_SE.RDS")
+set.seed(226)
+sampDMR <- sample(rownames(X.T), 10) ## Sample only 10 DMRs for speed sake
+original.X <- t(X.T[sampDMR, ])
+
+## INT Transformation
+INT.X <- INT(original.X, 0.5)
+```
+
+
+
+## 3. Glasso on Zero-Inflated the Data, Before and After INT
+
+```{r}
+
+
+```
+
+
+## 4. Benjamin-Hotchberg and Benjamin-Yekutielli Test for Edge Selection
+
+

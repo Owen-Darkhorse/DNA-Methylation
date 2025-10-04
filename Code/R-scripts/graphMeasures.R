@@ -38,7 +38,7 @@ nodal_efficiency <- function(g) {
    diag(inv_sp) <- 0 #ignore self_distances
    
    n <- vcount(subgraph)
-   eff <- sum(inv_sp) / n*(n-1)
+   eff <- sum(inv_sp) / (n*(n-1))
    return(eff)
   })
 }
@@ -48,9 +48,25 @@ nodal_clust_coef <- function(g) {
 }
 
 ## Global Measures ------------------------------------------------
+global_strength <- function(nodal_strength) {mean(nodal_strength)}
 
+char_path_length <- function(g){
+  mean_distance(g, directed = F, weights = 1/E(g)$weight)
+}
 
+global_efficiency <- function(g) {
+  sp_lengths <- distances(g, weights = 1/E(g)$weight)
+  inv_sp <- 1/abs(sp_lengths) 
+  diag(inv_sp) <- 0 #ignore self_distances
+  
+  n <- vcount(g)
+  eff <- sum(inv_sp) / (n*(n-1))
+  return(eff)
+}
 
+modularity_score <- function(g) {
+  modularity(cluster_louvain(g, weights = E(g)$weight))
+}
 
 ### Spectural Clustering Code ----------------------------------------
 ## Compute the Similarity Matrix with Gaussian Radial Kernel
