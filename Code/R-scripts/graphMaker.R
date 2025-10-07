@@ -1,7 +1,16 @@
 ## This script is dedicated for partial correlation calculation through GLasso
 
-## Create the covariance matrix with input X matrix
-createCov <- function(X) {cov(X)}
+## int.X: inverse normal transformed methylation matrix
+## rho: the tuning parameter for the graphical lasso
+## Output: the precision matrix under glasso scheme
+glassoPreMat <- function(int.X, rho = 0.5) {
+  S <- cov(int.X)
+  n <- nrow(int.X)
+  glassoRes <- glasso(S, rho = rho,
+                      nobs = n,
+                      maxit = 100)
+  glassoRes
+}
 
 ## glasso for finding the penalized inverse covariance matrix
 ## convert inverse covariance to partial correlation matrix
@@ -23,6 +32,8 @@ parCorr_from_precision <- function(precision, rho, n) {
     as_tbl_graph() %>%
     activate(edges) %>%
     filter(from != to)
+  
+  sparseCovInvGraph
 }
 
 ## Finds the optimal rho value based on extended BIC for graphs
@@ -38,7 +49,7 @@ find_optimal_rho <- function(S, rhoList, n) {
 ## g: igraph class, the input graph object
 ## rho: a float, the penalization coefficient
 ## status: a character, the disease status, healthy or any cancer type
-plot_parcorr_graph <- function(g, rho, status) {
+plot_parcorr_graph <- function(g, rho, status, title) {
   ggraph(g, 
          layout = 'linear', circular = TRUE) + 
     geom_node_point()+
@@ -47,7 +58,8 @@ plot_parcorr_graph <- function(g, rho, status) {
                                high="black",
                                limits = c(0, 0.4))+
     coord_fixed()+
-    labs(subtitle = paste("rho = 1,", status),
+    labs(title = title,
+         subtitle = paste("rho = ", rho, ", ", status),
          colour = "Pcorr")
 }
 

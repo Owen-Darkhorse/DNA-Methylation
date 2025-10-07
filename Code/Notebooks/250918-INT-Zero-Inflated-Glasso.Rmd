@@ -21,20 +21,18 @@ knitr::opts_chunk$set(echo = TRUE)
 
 1. Application of Glasso on zero-inflated data before and after INT transformation
   - Compare the networks before and after transformations
-2. Benchmark with Hypothesis Testing
-  - Assumptions check for Benjamin-Hotchberg and Benjamin-Yekutielli Test, do they work for correlation of the current type?
   
 ## 2. Loading Data and Packages
 
 ```{r message=FALSE}
 ## Load packages
-library(HurdleNormal)
 library(tidyverse)
 library(ggplot2)
 library(cowplot)
 library(igraph)
 library(tidygraph)
 library(ggraph)
+library(ppcor)
 
 ## Load customized functions
 source("../R-scripts/INT.R")
@@ -45,20 +43,137 @@ set.seed(226)
 sampDMR <- sample(rownames(X.T), 10) ## Sample only 10 DMRs for speed sake
 original.X <- t(X.T[sampDMR, ])
 
+## Load Cancer Types
+sampleInfo <- read.csv("../../Data/Common_pan_cancer_hyper_bins_adjusted_cnt_in_SE_samples_info.csv")
+cancerTypes <- sampleInfo$cancer_type
+
 ## INT Transformation
-INT.X <- INT(original.X, 0.5)
+INT.X <- INT(original.X, 0.25)
 ```
 
 
 
-## 3. Glasso on Zero-Inflated the Data, Before and After INT
+## 3. Glasso on Zero-Inflated the Data, Before and After INT, All Samples
 
 ```{r}
+source("../R-scripts/graphMaker.R")
+library(glasso)
+## Partial Pearson Correlation before any transformations
+ParCorrNone <- pcor(original.X, method = "pearson")
 
+## Partial Pearson Correlation after INT transformations
+ParCorrINT <- pcor(INT.X, method = "pearson")
+
+## Glasso before INT
+glassoNone <- glassoPreMat(original.X, rho = 0.25)
+ParCorrGlassoNone <- parCorr_from_precision(glassoNone$wi, 0.25, nrow(original.X))
+
+## Glasso after IVT
+glassoINT <- glassoPreMat(INT.X, rho = 0.25)
+ParCorrGlassoINT <- parCorr_from_precision(glassoINT$wi, 0.25, nrow(INT.X))
+
+## Graphical Comparison
+ParCorrNoneGraph <- plot_parcorr_graph(ParCorrNone$estimate, NA, "All", "Before INT")
+ParCorrINTGraph <- plot_parcorr_graph(ParCorrINT$estimate, NA, "All", "After INT")
+ParCorrNoneGlassoGraph <- plot_parcorr_graph(ParCorrGlassoNone, 0.25, "All", "Before INT Glasso")
+ParCorrINTGlassoGraph <- plot_parcorr_graph(ParCorrGlassoINT, 0.25, "All", "After INT Glasso")
+
+plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
+                          ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
+          nrow = 2, ncol = 2)
+ggsave('../../Images/GraphVis/AllSampleINTGlasso.png')
+
+```
+
+**Main Takeaway**:
+INT transformation can lead to slightly differences in partial correlations.
+
+**Observations**:
+1. For unpenalized Pcorr graphs, egde sets look similar before and after INT, but the color lightens after INT.
+2. For glasso graphs, not only color lightens, but also removal of heavily weighted old edges and replacement by new and lighter weighted edges.
+
+## 4. Glasso on Zero-Inflated the Data, Before and After INT, Cancer Samples
+
+```{r}
+## Partial Pearson Correlation before any transformations
+ParCorrNone <- pcor(original.X[str_ends(cancerTypes, "Cancer"),], method = "pearson")
+
+## Partial Pearson Correlation after INT transformations
+ParCorrINT <- pcor(INT.X[str_ends(cancerTypes, "Cancer"),], method = "pearson")
+
+## Glasso before INT
+glassoNone <- glassoPreMat(original.X[str_ends(cancerTypes, "Cancer"),], rho = 0.25)
+ParCorrGlassoNone <- parCorr_from_precision(glassoNone$wi, 0.25, nrow(original.X))
+
+## Glasso after IVT
+glassoINT <- glassoPreMat(INT.X[str_ends(cancerTypes, "Cancer"),], rho = 0.25)
+ParCorrGlassoINT <- parCorr_from_precision(glassoINT$wi, 0.25, nrow(INT.X))
+
+## Graphical Comparison
+ParCorrNoneGraph <- plot_parcorr_graph(ParCorrNone$estimate, NA, "Any Cancer", "Before INT")
+ParCorrINTGraph <- plot_parcorr_graph(ParCorrINT$estimate, NA, "Any Cancer", "After INT")
+ParCorrNoneGlassoGraph <- plot_parcorr_graph(ParCorrGlassoNone, 0.25, "Any Cancer", "Before INT Glasso")
+ParCorrINTGlassoGraph <- plot_parcorr_graph(ParCorrGlassoINT, 0.25, "Any Cancer", "After INT Glasso")
+
+plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
+                          ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
+          nrow = 2, ncol = 2)
+ggsave('../../Images/GraphVis/CancerINTGlasso.png')
+```
+
+**Main Takeaway**:
+Partial correlations of methylation between gene regions are strong in cancer individuals, and dominate the overall methylation.
+
+**Observations**:
+Graphs of cancer samples look similar to partial correlation graphs based on all samples, with a few edges create and removed relative to the reference graph.
+
+## 5. Glasso on Zero-Inflated the Data, Before and After INT, Normal Samples
+
+```{r}
+## Partial Pearson Correlation before any transformations
+ParCorrNone <- pcor(original.X[cancerTypes == "Normal", ], method = "pearson")
+
+## Partial Pearson Correlation after INT transformations
+ParCorrINT <- pcor(INT.X[cancerTypes == "Normal", ], method = "pearson")
+
+## Glasso before INT
+glassoNone <- glassoPreMat(original.X[cancerTypes == "Normal", ], rho = 0.25)
+ParCorrGlassoNone <- parCorr_from_precision(glassoNone$wi, 0.25, nrow(original.X))
+
+## Glasso after IVT
+glassoINT <- glassoPreMat(INT.X[cancerTypes == "Normal", ], rho = 0.25)
+ParCorrGlassoINT <- parCorr_from_precision(glassoINT$wi, 0.25, nrow(INT.X))
+
+## Graphical Comparison
+ParCorrNoneGraph <- plot_parcorr_graph(ParCorrNone$estimate, NA, "Healthy Normal", "Before INT")
+ParCorrINTGraph <- plot_parcorr_graph(ParCorrINT$estimate, NA, "Healthy Normal", "After INT")
+ParCorrNoneGlassoGraph <- plot_parcorr_graph(ParCorrGlassoNone, 0.25, "Healthy Normal", "Before INT Glasso")
+ParCorrINTGlassoGraph <- plot_parcorr_graph(ParCorrGlassoINT, 0.25, "Healthy Normal", "After INT Glasso")
+
+plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
+                          ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
+          nrow = 2, ncol = 2)
+ggsave('../../Images/GraphVis/HealthyINTGlasso.png')
+```
+
+**Main Takeaways**:
+Partial Correlations of healthy Normals are much weaker than cancer samples.
+
+## 6. HurdleNormal on INT Transformed Data
+
+```{r}
+# library(HurdleNormal)
+## Glasso before INT
+
+
+## Glasso after IVT
+
+
+## Graphical Comparison
 
 ```
 
 
-## 4. Benjamin-Hotchberg and Benjamin-Yekutielli Test for Edge Selection
+
 
 
