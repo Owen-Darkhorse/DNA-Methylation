@@ -1,5 +1,5 @@
 ---
-title: "250919-Application of Glasso on INT-Transformed Zero-Inflated Data"
+title: "251007-Application of Glasso on INT-Transformed Zero-Inflated Data"
 author: "Jingxin Wang"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -21,6 +21,12 @@ knitr::opts_chunk$set(echo = TRUE)
 
 1. Application of Glasso on zero-inflated data before and after INT transformation
   - Compare the networks before and after transformations
+2. Can we compare results of different yransformation approaches with same Glasso rho?  
+  - How to put methylation before and after transformation into the same scale?
+  - As rho increases, do paths of precision matrix elements change much before and after INT?  
+    * BIC trace curves: healthy vs cancers
+    * Path of the precision matrix component
+  - Can we center every column of the matrix and scale it by the same factor before Glasso?
   
 ## 2. Loading Data and Packages
 
@@ -82,7 +88,56 @@ plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
                           ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
           nrow = 2, ncol = 2)
 ggsave('../../Images/GraphVis/AllSampleINTGlasso.png')
+```
 
+```{r}
+## Scatter plot before and after transformation
+library(tidyverse)
+library(ggplot2)
+library(cowplot)
+## Extract partial correlations from upper triangle part of matrices
+extractPar <- function(allParCorr) {
+  takeUpperTriangle <- function(parCorr) {
+    parMat <- parCorr$estimate
+    parVec <- parMat[upper.tri(parMat)]
+    as.vector(parMat)
+  }
+  upperTrigPar <- list()
+  for (j in c("pearsonCorr", "spearmanCorr", "kendallCorr")) {
+    upperTrigPar[[j]] <- takeUpperTriangle(allParCorr[[j]])
+  }
+  
+  upperTrigPar
+}
+
+## Compare the partial correlations before and after transformations for all types of correlations
+compareParScatter <- function(refPar, expPar) {
+  scatterList <- list()
+  for (j in c("pearsonCorr", "spearmanCorr", "kendallCorr")) {
+    scatterList[[j]] <- ggplot(data = data.frame("Before" = refPar[[j]], "After" = expPar[[j]])) + 
+      geom_point(aes(x = Before, y = After)) + 
+      coord_cartesian(xlim = c(0,1), ylim = c(0,1)) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+      labs(title = j)
+  }
+  
+  plot_grid(plotlist = scatterList, nrow = 1, ncol = 3) 
+}
+
+## Calculation
+originalParEst <- extractPar(originalParRes)
+rootParEst <- extractPar(rootParRes)
+logParEst <- extractPar(logParRes)
+intParEst <- extractPar(intParRes)
+
+## Plotting
+plot_grid(plotlist = list(
+  compareParScatter(originalParEst, rootParEst),
+  compareParScatter(originalParEst, logParEst),
+  compareParScatter(originalParEst, intParEst)
+), labels = c("Root", "Log", "INT"),
+nrow = 3, ncol = 1)
+ggsave(filename = "../../Images/ParCorr/parCorrAfterTrans.png")
 ```
 
 **Main Takeaway**:
@@ -121,13 +176,22 @@ plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
 ggsave('../../Images/GraphVis/CancerINTGlasso.png')
 ```
 
+```{r}
+## Scatter plot for par correlation
+
+```
+
 **Main Takeaway**:
 Partial correlations of methylation between gene regions are strong in cancer individuals, and dominate the overall methylation.
 
 **Observations**:
 Graphs of cancer samples look similar to partial correlation graphs based on all samples, with a few edges create and removed relative to the reference graph.
 
-## 5. Glasso on Zero-Inflated the Data, Before and After INT, Normal Samples
+## 5. Does edge strength differ a lot between healthy and cancers?
+
+
+
+## 6. Glasso on Zero-Inflated the Data, Before and After INT, Normal Samples
 
 ```{r}
 ## Partial Pearson Correlation before any transformations
@@ -159,7 +223,19 @@ ggsave('../../Images/GraphVis/HealthyINTGlasso.png')
 **Main Takeaways**:
 Partial Correlations of healthy Normals are much weaker than cancer samples.
 
-## 6. HurdleNormal on INT Transformed Data
+## 7. Compare Coeficient Path as Rho Slowly Change
+
+```{r}
+## Precision matrix component evolution
+
+```
+
+```{r}
+## Extended BIC comparison
+
+```
+
+## 8. HurdleNormal on INT Transformed Data
 
 ```{r}
 # library(HurdleNormal)
