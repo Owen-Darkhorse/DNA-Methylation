@@ -21,7 +21,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 1. Application of Glasso on zero-inflated data before and after INT transformation
   - Compare the networks before and after transformations
-2. Can we compare results of different yransformation approaches with same Glasso rho?  
+2. Can we compare results of different transformation approaches with same Glasso rho?  
   - How to put methylation before and after transformation into the same scale?
   - As rho increases, do paths of precision matrix elements change much before and after INT?  
     * BIC trace curves: healthy vs cancers
@@ -64,6 +64,9 @@ INT.X <- INT(original.X, 0.25)
 ```{r}
 source("../R-scripts/graphMaker.R")
 library(glasso)
+
+# original.X <- scale(original.X, center = T, scale = F)/50 ## Centering and Scaling by a factor of 50
+
 ## Partial Pearson Correlation before any transformations
 ParCorrNone <- pcor(original.X, method = "pearson")
 
@@ -89,151 +92,147 @@ plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
           nrow = 2, ncol = 2)
 ggsave('../../Images/GraphVis/AllSampleINTGlasso.png')
 ```
-
+Next, we will use scatter plot to compare the strength of upper triangular components of precision matrices before and after INT transformation.
 ```{r}
-## Scatter plot before and after transformation
-library(tidyverse)
-library(ggplot2)
-library(cowplot)
-## Extract partial correlations from upper triangle part of matrices
-extractPar <- function(allParCorr) {
-  takeUpperTriangle <- function(parCorr) {
-    parMat <- parCorr$estimate
-    parVec <- parMat[upper.tri(parMat)]
-    as.vector(parMat)
-  }
-  upperTrigPar <- list()
-  for (j in c("pearsonCorr", "spearmanCorr", "kendallCorr")) {
-    upperTrigPar[[j]] <- takeUpperTriangle(allParCorr[[j]])
-  }
-  
-  upperTrigPar
+## Extract upper triangle part of matrices
+takeUpperTriangle <- function(Mat) {
+    Vec <- Mat[upper.tri(Mat)]
+    as.vector(Vec)
 }
 
 ## Compare the partial correlations before and after transformations for all types of correlations
-compareParScatter <- function(refPar, expPar) {
-  scatterList <- list()
-  for (j in c("pearsonCorr", "spearmanCorr", "kendallCorr")) {
-    scatterList[[j]] <- ggplot(data = data.frame("Before" = refPar[[j]], "After" = expPar[[j]])) + 
+compareParScatter <- function(refPar, expPar, title) {
+  ggplot(data = data.frame("Before" = refPar, "After" = expPar)) + 
       geom_point(aes(x = Before, y = After)) + 
-      coord_cartesian(xlim = c(0,1), ylim = c(0,1)) +
+      coord_cartesian(xlim = c(-0.4,0.4), ylim = c(-0.4,0.4)) +
       geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
-      labs(title = j)
-  }
-  
-  plot_grid(plotlist = scatterList, nrow = 1, ncol = 3) 
+      labs(title = title)
 }
 
-## Calculation
-originalParEst <- extractPar(originalParRes)
-rootParEst <- extractPar(rootParRes)
-logParEst <- extractPar(logParRes)
-intParEst <- extractPar(intParRes)
+## Precision Matrix without penalty
+originalPrecMat <- solve(cov(original.X))
+intPrecMat <-solve(cov(INT.X))
+
+originalCompo <- takeUpperTriangle(originalPrecMat)
+intCompo <- takeUpperTriangle(intPrecMat)
+
+## Precision Matrix with penalty
+originalGlasso <- takeUpperTriangle(glassoNone$wi)
+intGlasso <- takeUpperTriangle(glassoINT$wi)
 
 ## Plotting
-plot_grid(plotlist = list(
-  compareParScatter(originalParEst, rootParEst),
-  compareParScatter(originalParEst, logParEst),
-  compareParScatter(originalParEst, intParEst)
-), labels = c("Root", "Log", "INT"),
-nrow = 3, ncol = 1)
-ggsave(filename = "../../Images/ParCorr/parCorrAfterTrans.png")
+compareParScatter(originalCompo, intCompo, "Precision Matrix")
+compareParScatter(originalGlasso, intGlasso, "Glasso Matrix")
+
+## Which component deviated from the original precision the most?
+cat("For unpenalized precision matrix --------------------\n")
+cat("The ", which.max(abs(originalCompo - intCompo)), "th component shows the biggest error of ", max(abs(originalCompo - intCompo)), "\n")
+cat("As compared maximum absolute value of all components before transformation:", max(abs(originalCompo)), "\n")
+cat("For glasso precision matrix ----------------------\n")
+cat("The ", which.max(abs(originalGlasso - intGlasso)), "th component shows the biggest error of ", max(abs(originalGlasso - intGlasso)), "\n")
+cat("As compared maximum absolute value of all components before transformation:", max(abs(originalGlasso)), "\n")
+
+abs(originalPrecMat - intPrecMat) == max(abs(originalCompo - intCompo))
+```
+```{r}
+library(iDINGO)
+
+## Inverse Component Trajectory and eBIC path
+precMatPath <- function(X, rho.Vec, transName) {
+  p <- ncol(X); n <- nrow(X)
+  
+  upperTriMat <- matrix(nrow = 0, ncol = p*(p-1)/2)
+  eBIC.vec <- c()
+  for (rho in rho.Vec) {
+    glassoMat <- glassoPreMat(original.X, rho = rho)
+    upperTriVec <- takeUpperTriangle(glassoMat$wi)
+    upperTriMat <- rbind(upperTriMat, upperTriVec)
+    eBIC <- extendedBIC(0.5, glassoMat$wi, cov(original.X), n)
+    eBIC.vec <- c(eBIC.vec, eBIC)
+  }
+  
+  par(mfrow = c(1,2))
+  matplot(x = rho.Vec, y = upperTriMat, type = "l", lty = 1,
+          xlab = "rho", ylab = "Precision Matrix Coef",
+          ylim = c(-0.3, 0.3), main = paste("Precision matrix element path of", transName))
+  
+  plot(x = rho.Vec, y = eBIC.vec, type = "l", lty = 1,
+        xlab = "rho", ylab = "Extended BIC",
+        main = paste("Extended BIC of", transName))
+}
+
+precMatPath(original.X, seq(0.1, 5, 0.1), "Original")
+precMatPath(INT.X, seq(0.1, 5, 0.1), "INT")
 ```
 
 **Main Takeaway**:
-INT transformation can lead to slightly differences in partial correlations.
+1. INT transformation can lead to big differences in partial correlations.
+2. Convergence of all upper triangular components occur at rho = 2
 
 **Observations**:
 1. For unpenalized Pcorr graphs, egde sets look similar before and after INT, but the color lightens after INT.
 2. For glasso graphs, not only color lightens, but also removal of heavily weighted old edges and replacement by new and lighter weighted edges.
+3. The error in inverse covariance matrix components before and after transformation can be very large relative to the size of the component before transformation.
+4. The component giving the biggest error in the regular precision matrix also gives the biggest error in the glasso matrix; the component locate at an off-diagonal entry.
+5. There is very difference in the evolution path between original and INT-transformed glasso components.
+6. As rho increases, eBIC increases without any sign of slowing the increase. This could imply a worsening representation of the original partial correlation structure as the model grow sparser.
 
-## 4. Glasso on Zero-Inflated the Data, Before and After INT, Cancer Samples
+## 4. Do edge sets differ a lot between healthy and cancers?
 
 ```{r}
-## Partial Pearson Correlation before any transformations
-ParCorrNone <- pcor(original.X[str_ends(cancerTypes, "Cancer"),], method = "pearson")
+allTypes <- unique(cancerTypes)
+allTypes <- allTypes[allTypes != "Normal"]
 
-## Partial Pearson Correlation after INT transformations
-ParCorrINT <- pcor(INT.X[str_ends(cancerTypes, "Cancer"),], method = "pearson")
+## Preparing healthy normal data
+healthy.original <- original.X[cancerTypes == "Normal", ]
+healthy.INT <-  INT(healthy.original, 0.25)
 
-## Glasso before INT
-glassoNone <- glassoPreMat(original.X[str_ends(cancerTypes, "Cancer"),], rho = 0.25)
-ParCorrGlassoNone <- parCorr_from_precision(glassoNone$wi, 0.25, nrow(original.X))
+## Exact precision matrix
+precMat.healthyOri <- solve(cov(healthy.original))
+precMat.healthyINT <- solve(cov(healthy.INT))
 
-## Glasso after IVT
-glassoINT <- glassoPreMat(INT.X[str_ends(cancerTypes, "Cancer"),], rho = 0.25)
-ParCorrGlassoINT <- parCorr_from_precision(glassoINT$wi, 0.25, nrow(INT.X))
 
-## Graphical Comparison
-ParCorrNoneGraph <- plot_parcorr_graph(ParCorrNone$estimate, NA, "Any Cancer", "Before INT")
-ParCorrINTGraph <- plot_parcorr_graph(ParCorrINT$estimate, NA, "Any Cancer", "After INT")
-ParCorrNoneGlassoGraph <- plot_parcorr_graph(ParCorrGlassoNone, 0.25, "Any Cancer", "Before INT Glasso")
-ParCorrINTGlassoGraph <- plot_parcorr_graph(ParCorrGlassoINT, 0.25, "Any Cancer", "After INT Glasso")
+## Take Uppper Triangular compoents
+precCompo.healthyOri <- takeUpperTriangle(precMat.healthyOri)
+precCompo.healthyINT <- takeUpperTriangle(precMat.healthyINT)
 
-plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
-                          ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
-          nrow = 2, ncol = 2)
-ggsave('../../Images/GraphVis/CancerINTGlasso.png')
 ```
 
 ```{r}
-## Scatter plot for par correlation
-
+for (k in allTypes) {
+  ## Prepare precision matrices for subset of data based on cancer types.
+  X_k.original <- original.X[cancerTypes == k, ]
+  X_k.INT <- INT(X_k.original, 0.25)
+  
+  precMat.original <- solve(cov(X_k.original))
+  precMat.INT <- solve(cov(X_k.INT))
+  
+  ## Scatter Plot Comparison
+  precCompo.original <- takeUpperTriangle(precMat.original)
+  precCompo.INT <- takeUpperTriangle(precMat.INT)
+  
+  
+  A <- ggplot(data = data.frame("Healthy" = precCompo.healthyOri, "Cancer" = precCompo.original)) + 
+      geom_point(aes(x = Healthy, y = Cancer)) + 
+      # coord_cartesian(xlim = c(-0.4,0.4), ylim = c(-0.4,0.4)) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+      labs(title = paste("Healthy vs ", k, "Original"))
+  
+  B <- ggplot(data = data.frame("Healthy" = precCompo.healthyINT, "Cancer" = precCompo.INT)) + 
+      geom_point(aes(x = Healthy, y = Cancer)) + 
+      # coord_cartesian(xlim = c(-0.4,0.4), ylim = c(-0.4,0.4)) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+      labs(title = paste("Healthy vs ", k, ", INT"))
+  
+  plot_grid(plotlist = list(A, B), nrow = 1, ncol = 2) %>% print()
+}
 ```
-
-**Main Takeaway**:
-Partial correlations of methylation between gene regions are strong in cancer individuals, and dominate the overall methylation.
 
 **Observations**:
-Graphs of cancer samples look similar to partial correlation graphs based on all samples, with a few edges create and removed relative to the reference graph.
+1. Edge strengths of different cancers very different those of healthy normals.
+2. Precision matrix components of Bladder cancer tend to concentrate around 0, with 3 outliers outside [-2, 2] band.
+3. Linear relationship in regular precision matrix entries were observed between healthy sample and colorectal, pancreatic, and renal cancer sample
 
-## 5. Does edge strength differ a lot between healthy and cancers?
-
-
-
-## 6. Glasso on Zero-Inflated the Data, Before and After INT, Normal Samples
-
-```{r}
-## Partial Pearson Correlation before any transformations
-ParCorrNone <- pcor(original.X[cancerTypes == "Normal", ], method = "pearson")
-
-## Partial Pearson Correlation after INT transformations
-ParCorrINT <- pcor(INT.X[cancerTypes == "Normal", ], method = "pearson")
-
-## Glasso before INT
-glassoNone <- glassoPreMat(original.X[cancerTypes == "Normal", ], rho = 0.25)
-ParCorrGlassoNone <- parCorr_from_precision(glassoNone$wi, 0.25, nrow(original.X))
-
-## Glasso after IVT
-glassoINT <- glassoPreMat(INT.X[cancerTypes == "Normal", ], rho = 0.25)
-ParCorrGlassoINT <- parCorr_from_precision(glassoINT$wi, 0.25, nrow(INT.X))
-
-## Graphical Comparison
-ParCorrNoneGraph <- plot_parcorr_graph(ParCorrNone$estimate, NA, "Healthy Normal", "Before INT")
-ParCorrINTGraph <- plot_parcorr_graph(ParCorrINT$estimate, NA, "Healthy Normal", "After INT")
-ParCorrNoneGlassoGraph <- plot_parcorr_graph(ParCorrGlassoNone, 0.25, "Healthy Normal", "Before INT Glasso")
-ParCorrINTGlassoGraph <- plot_parcorr_graph(ParCorrGlassoINT, 0.25, "Healthy Normal", "After INT Glasso")
-
-plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
-                          ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
-          nrow = 2, ncol = 2)
-ggsave('../../Images/GraphVis/HealthyINTGlasso.png')
-```
-
-**Main Takeaways**:
-Partial Correlations of healthy Normals are much weaker than cancer samples.
-
-## 7. Compare Coeficient Path as Rho Slowly Change
-
-```{r}
-## Precision matrix component evolution
-
-```
-
-```{r}
-## Extended BIC comparison
-
-```
 
 ## 8. HurdleNormal on INT Transformed Data
 
