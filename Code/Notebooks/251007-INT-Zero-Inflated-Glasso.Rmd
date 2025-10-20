@@ -27,10 +27,7 @@ knitr::opts_chunk$set(echo = TRUE)
     * BIC trace curves: healthy vs cancers
     * Path of the precision matrix component
   - Can we center every column of the matrix and scale it by the same factor before Glasso?
-  
-## 2. Loading Data and Packages
-
-```{r message=FALSE}
+```{r}
 ## Load packages
 library(tidyverse)
 library(ggplot2)
@@ -39,7 +36,54 @@ library(igraph)
 library(tidygraph)
 library(ggraph)
 library(ppcor)
+library(iDINGO)
+library(HurdleNormal)
 
+## Define Global functions
+## Extract upper triangle part of matrices
+takeUpperTriangle <- function(Mat) {
+    Vec <- Mat[upper.tri(Mat)]
+    as.vector(Vec)
+}
+
+## Compare the partial correlations before and after transformations for all types of correlations
+compareParScatter <- function(refPar, expPar, title) {
+  ggplot(data = data.frame("Before" = refPar, "After" = expPar)) + 
+      geom_point(aes(x = Before, y = After)) + 
+      coord_cartesian(xlim = c(-0.4,0.4), ylim = c(-0.4,0.4)) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+      labs(title = title)
+}
+
+
+## Inverse Component Trajectory and eBIC path
+precMatPath <- function(X, rho.Vec, transName) {
+  p <- ncol(X); n <- nrow(X)
+  
+  upperTriMat <- matrix(nrow = 0, ncol = p*(p-1)/2)
+  eBIC.vec <- c()
+  for (rho in rho.Vec) {
+    glassoMat <- glassoPreMat(original.X, rho = rho)
+    upperTriVec <- takeUpperTriangle(glassoMat$wi)
+    upperTriMat <- rbind(upperTriMat, upperTriVec)
+    eBIC <- extendedBIC(0.5, glassoMat$wi, cov(original.X), n)
+    eBIC.vec <- c(eBIC.vec, eBIC)
+  }
+  
+  par(mfrow = c(1,2))
+  matplot(x = rho.Vec, y = upperTriMat, type = "l", lty = 1,
+          xlab = "rho", ylab = "Precision Matrix Coef",
+          ylim = c(-0.3, 0.3), main = paste("Precision matrix element path of", transName))
+  
+  plot(x = rho.Vec, y = eBIC.vec, type = "l", lty = 1,
+        xlab = "rho", ylab = "Extended BIC",
+        main = paste("Extended BIC of", transName))
+}
+```
+
+## 2. Loading Data and Packages
+
+```{r message=FALSE}
 ## Load customized functions
 source("../R-scripts/INT.R")
 
@@ -60,6 +104,7 @@ INT.X <- INT(original.X, 0.25)
 
 
 ## 3. Glasso on Zero-Inflated the Data, Before and After INT, All Samples
+### 3.1 Network Comparison
 
 ```{r}
 source("../R-scripts/graphMaker.R")
@@ -92,25 +137,14 @@ plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
           nrow = 2, ncol = 2)
 ggsave('../../Images/GraphVis/AllSampleINTGlasso.png')
 ```
+
+### 3.2 Does INT significantly alter precision matrix components?
+
 Next, we will use scatter plot to compare the strength of upper triangular components of precision matrices before and after INT transformation.
 ```{r}
-## Extract upper triangle part of matrices
-takeUpperTriangle <- function(Mat) {
-    Vec <- Mat[upper.tri(Mat)]
-    as.vector(Vec)
-}
-
-## Compare the partial correlations before and after transformations for all types of correlations
-compareParScatter <- function(refPar, expPar, title) {
-  ggplot(data = data.frame("Before" = refPar, "After" = expPar)) + 
-      geom_point(aes(x = Before, y = After)) + 
-      coord_cartesian(xlim = c(-0.4,0.4), ylim = c(-0.4,0.4)) +
-      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
-      labs(title = title)
-}
-
 ## Precision Matrix without penalty
-originalPrecMat <- solve(cov(original.X))
+condcenter.X <- conditionalCenter(original.X)
+originalPrecMat <- solve(cov(condcenter.X))
 intPrecMat <-solve(cov(INT.X))
 
 originalCompo <- takeUpperTriangle(originalPrecMat)
@@ -133,40 +167,18 @@ cat("The ", which.max(abs(originalGlasso - intGlasso)), "th component shows the 
 cat("As compared maximum absolute value of all components before transformation:", max(abs(originalGlasso)), "\n")
 
 abs(originalPrecMat - intPrecMat) == max(abs(originalCompo - intCompo))
+
+cat("Before INT, the 19th correlation is:", cor(original.X[, "523070"], original.X[, "8978709"]))
+cat("After INT, the 19th correlation is:", cor(INT.X[, "523070"], INT.X[, "8978709"]))
 ```
+
 ```{r}
-library(iDINGO)
-
-## Inverse Component Trajectory and eBIC path
-precMatPath <- function(X, rho.Vec, transName) {
-  p <- ncol(X); n <- nrow(X)
-  
-  upperTriMat <- matrix(nrow = 0, ncol = p*(p-1)/2)
-  eBIC.vec <- c()
-  for (rho in rho.Vec) {
-    glassoMat <- glassoPreMat(original.X, rho = rho)
-    upperTriVec <- takeUpperTriangle(glassoMat$wi)
-    upperTriMat <- rbind(upperTriMat, upperTriVec)
-    eBIC <- extendedBIC(0.5, glassoMat$wi, cov(original.X), n)
-    eBIC.vec <- c(eBIC.vec, eBIC)
-  }
-  
-  par(mfrow = c(1,2))
-  matplot(x = rho.Vec, y = upperTriMat, type = "l", lty = 1,
-          xlab = "rho", ylab = "Precision Matrix Coef",
-          ylim = c(-0.3, 0.3), main = paste("Precision matrix element path of", transName))
-  
-  plot(x = rho.Vec, y = eBIC.vec, type = "l", lty = 1,
-        xlab = "rho", ylab = "Extended BIC",
-        main = paste("Extended BIC of", transName))
-}
-
 precMatPath(original.X, seq(0.1, 5, 0.1), "Original")
 precMatPath(INT.X, seq(0.1, 5, 0.1), "INT")
 ```
 
 **Main Takeaway**:
-1. INT transformation can lead to big differences in partial correlations.
+1. INT transformation can lead to big differences in partial correlations from the original data. INT was not used in rhe right way or it simply distorted true partial correlation. 
 2. Convergence of all upper triangular components occur at rho = 2
 
 **Observations**:
@@ -177,7 +189,109 @@ precMatPath(INT.X, seq(0.1, 5, 0.1), "INT")
 5. There is very difference in the evolution path between original and INT-transformed glasso components.
 6. As rho increases, eBIC increases without any sign of slowing the increase. This could imply a worsening representation of the original partial correlation structure as the model grow sparser.
 
-## 4. Do edge sets differ a lot between healthy and cancers?
+### 3.3 Does Conditional Centering significantly alter precision matrix?
+
+```{r}
+## Precision Matrix without penalty
+condcenter.X <- conditionalCenter(original.X)
+condCenterPrecMat <-solve(cov(condcenter.X))
+condCenterCompo <- takeUpperTriangle(condCenterPrecMat)
+
+## Plotting
+compareParScatter(originalCompo, condCenterCompo, "Precision Matrix")
+
+## Which component deviated from the original precision the most?
+cat("For unpenalized precision matrix --------------------\n")
+cat("The ", which.max(abs(originalCompo - condCenterCompo)), "th component shows the biggest error of ", max(abs(originalCompo - condCenterCompo)), "\n")
+cat("As compared maximum absolute value of all components before transformation:", max(abs(originalCompo)), "\n")
+abs(originalPrecMat - condCenterPrecMat) == max(abs(originalCompo - condCenterPrecMat))
+
+```
+Conditional centering of non-zero values did not alter precision matrix components as much as INT.
+
+## 4. HurdleNormal with Different the Transformation Methods: Original, INT+Repositioning Hurdle, Conditional Centering
+```{r}
+## INT + Repositioning the Hurdle at 0
+INT.X.reposit <- apply(INT.X, MARGIN = 2, FUN = function(x) x - min(x))
+hist(INT.X.reposit[,1], main = "Marginal distribution after moving the hurdle to 0", xlab = "Y1")
+```
+Conditional centering will substract the mean of non-zero values from original value.
+
+```{r}
+condcenter.X <- conditionalCenter(original.X)
+plot(condcenter.X[,1], condcenter.X[,3], main = "Joint Distribution of Y1, Y2 after condition centering", xlab = "Y1", ylab = "Y2")
+```
+
+
+```{r}
+hurdleComparison <- function(cancerType) {
+  hurdleFit.original <- fitHurdle(original.X[cancerTypes == cancerType, ], nlambda = 10)
+  hurdleFit.INT <- fitHurdle(INT.X.reposit[cancerTypes == cancerType, ], nlambda = 10)
+  hurdleFit.condcenter <- fitHurdle(condcenter.X[cancerTypes == cancerType, ], nlambda = 10)
+  
+  ## Compare path of extended BIC
+  candidateModels <- list("Original" = hurdleFit.original, 
+                          "INT+Reposition" = hurdleFit.INT, 
+                          "Conditional Centering" = hurdleFit.condcenter)
+  bicPlotList <- list()
+  for (i in 1:3) {
+    bicPlotList <- append(bicPlotList, 
+                          ggplot(data = candidateModels[[i]]$BIC_etc)+
+                            geom_line(aes(x = trueEdges, y = BIC))+
+                            labs(title = names(candidateModels)[i]))
+  }
+  
+  plot_grid(plotlist = bicPlotList, nrow = 1) %>% print()
+
+  ## Visualize the coef path
+  coefPathList <- list()
+  par(mfrow = c(1,3))
+  for (i in 1:3) {
+    coefPath <- lapply(candidateModels[[i]]$adjMat, FUN = takeUpperTriangle) %>%
+      reduce(.f = rbind)
+    rhoPath <- candidateModels[[i]]$lambda
+    
+    matplot(x = rhoPath, y = coefPath, type = "l", lwd = 2,
+            main = paste("Coef Paths:", names(candidateModels)[i]),
+            xlab = "rho", ylab = "Off-diagonal Entries")
+  }
+  
+  ## Network Comparison
+  positList <- c(1,3,8,10)
+  
+  networkPlotList <- list()
+  for (i in positList) {
+    originalGraph <- plot_parcorr_graph(candidateModels[[1]]$adjMat[[i]] %>% as.matrix(), 
+                                          candidateModels[[1]]$lambda[i] %>% round(2),
+                                          "Healthy", "Original")
+    intGraph <- plot_parcorr_graph(candidateModels[[2]]$adjMat[[i]] %>% as.matrix(), 
+                                        candidateModels[[2]]$lambda[i] %>% round(2),
+                                        "Healthy", "INT")
+    condCenterGraph <- plot_parcorr_graph(candidateModels[[3]]$adjMat[[i]] %>% as.matrix(), 
+                                        candidateModels[[3]]$lambda[i] %>% round(2),
+                                        "Healthy", "Conditional Centering")
+      
+    networkPlotList <- append(networkPlotList, 
+                          plot_grid(plotlist = list(originalGraph, intGraph, condCenterGraph),
+                                    nrow = 1))
+  }
+  
+  plot_grid(plotlist = networkPlotList[1:2], ncol = 1, nrow = 4) %>% print()
+  plot_grid(plotlist = networkPlotList[1:2], ncol = 1, nrow = 4) %>% print()
+  gc()
+  return(0)
+}
+
+```
+
+```{r message=F}
+hurdleComparison("Normal")
+hurdleComparison("Blood Cancer")
+```
+
+
+
+## 5. Do edge sets differ a lot between healthy and cancers?
 
 ```{r}
 allTypes <- unique(cancerTypes)
@@ -232,23 +346,3 @@ for (k in allTypes) {
 1. Edge strengths of different cancers very different those of healthy normals.
 2. Precision matrix components of Bladder cancer tend to concentrate around 0, with 3 outliers outside [-2, 2] band.
 3. Linear relationship in regular precision matrix entries were observed between healthy sample and colorectal, pancreatic, and renal cancer sample
-
-
-## 8. HurdleNormal on INT Transformed Data
-
-```{r}
-# library(HurdleNormal)
-## Glasso before INT
-
-
-## Glasso after IVT
-
-
-## Graphical Comparison
-
-```
-
-
-
-
-
