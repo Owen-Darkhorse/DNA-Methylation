@@ -54,13 +54,15 @@ plot_parcorr_graph <- function(g, rho, status, title) {
          layout = 'linear', circular = TRUE) + 
     geom_node_point()+
     geom_edge_arc(aes(colour = weight)) + 
-    scale_edge_colour_gradient(low="grey",
-                               high="black",
-                               limits = c(0, 0.4))+
+    scale_edge_colour_gradient2(low="blue",
+                               high="red",
+                               mid = "white",
+                               limits = c(-1, 1))+
     coord_fixed()+
     labs(title = title,
          subtitle = paste("rho = ", rho, ", ", status),
-         colour = "Pcorr")
+         colour = "Pcorr")+
+    theme(legend.position = "none")
 }
 
 ## Plot a list of ggplots in 3*3 grid, save the plot into the image directory

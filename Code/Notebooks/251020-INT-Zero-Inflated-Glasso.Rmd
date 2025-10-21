@@ -1,5 +1,5 @@
 ---
-title: "251007-Application of Glasso on INT-Transformed Zero-Inflated Data"
+title: "251020-Application of Glasso on INT-Transformed Zero-Inflated Data"
 author: "Jingxin Wang"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -27,11 +27,12 @@ knitr::opts_chunk$set(echo = TRUE)
     * BIC trace curves: healthy vs cancers
     * Path of the precision matrix component
   - Can we center every column of the matrix and scale it by the same factor before Glasso?
-```{r}
+```{r message=FALSE}
 ## Load packages
 library(tidyverse)
 library(ggplot2)
 library(cowplot)
+library(gridExtra)
 library(igraph)
 library(tidygraph)
 library(ggraph)
@@ -132,19 +133,38 @@ ParCorrINTGraph <- plot_parcorr_graph(ParCorrINT$estimate, NA, "All", "After INT
 ParCorrNoneGlassoGraph <- plot_parcorr_graph(ParCorrGlassoNone, 0.25, "All", "Before INT Glasso")
 ParCorrINTGlassoGraph <- plot_parcorr_graph(ParCorrGlassoINT, 0.25, "All", "After INT Glasso")
 
-plot_grid(plotlist = list(ParCorrNoneGraph, ParCorrINTGraph,
+grid.arrange(grobs = list(ParCorrNoneGraph, ParCorrINTGraph,
                           ParCorrNoneGlassoGraph, ParCorrINTGlassoGraph), 
           nrow = 2, ncol = 2)
 ggsave('../../Images/GraphVis/AllSampleINTGlasso.png')
 ```
+**Main Takeaway**:
+1. INT transformation can lead to big differences in partial correlations from the original data. INT was not used in rhe right way or it simply distorted true partial correlation. 
 
-### 3.2 Does INT significantly alter precision matrix components?
+
+**Observations**:
+1. For unpenalized Pcorr graphs, egde sets look similar before and after INT, but the color lightens after INT.
+2. For glasso graphs, not only color lightens, but also removal of heavily weighted old edges and replacement by new and lighter weighted edges.
+3. The error in inverse covariance matrix components before and after transformation can be very large relative to the size of the component before transformation.
+4. The component giving the biggest error in the regular precision matrix also gives the biggest error in the glasso matrix; the component locate at an off-diagonal entry.
+
+
+### 3.2 BIC and Coefficient Paths
+```{r}
+precMatPath(original.X, seq(0.1, 5, 0.1), "Original")
+precMatPath(INT.X, seq(0.1, 5, 0.1), "INT")
+```
+**Main Observations**:
+1.Convergence of all upper triangular components occur at rho = 2. The rate of convergence slows down quickly as rho increases.
+2. The evolution path between original and INT-transformed glasso look very simlar.
+6. eBIC increases the rho, which implies that the decline of model fit outweigh the decrease in model complexity as rho increases and the number of non-zero edges decreases. As a result, the unpenalized model (regular precision matrix) is the best fit of model.
+
+### 3.3 Does INT significantly alter precision matrix components?
 
 Next, we will use scatter plot to compare the strength of upper triangular components of precision matrices before and after INT transformation.
 ```{r}
 ## Precision Matrix without penalty
-condcenter.X <- conditionalCenter(original.X)
-originalPrecMat <- solve(cov(condcenter.X))
+originalPrecMat <- solve(cov(original.X))
 intPrecMat <-solve(cov(INT.X))
 
 originalCompo <- takeUpperTriangle(originalPrecMat)
@@ -172,24 +192,8 @@ cat("Before INT, the 19th correlation is:", cor(original.X[, "523070"], original
 cat("After INT, the 19th correlation is:", cor(INT.X[, "523070"], INT.X[, "8978709"]))
 ```
 
-```{r}
-precMatPath(original.X, seq(0.1, 5, 0.1), "Original")
-precMatPath(INT.X, seq(0.1, 5, 0.1), "INT")
-```
 
-**Main Takeaway**:
-1. INT transformation can lead to big differences in partial correlations from the original data. INT was not used in rhe right way or it simply distorted true partial correlation. 
-2. Convergence of all upper triangular components occur at rho = 2
-
-**Observations**:
-1. For unpenalized Pcorr graphs, egde sets look similar before and after INT, but the color lightens after INT.
-2. For glasso graphs, not only color lightens, but also removal of heavily weighted old edges and replacement by new and lighter weighted edges.
-3. The error in inverse covariance matrix components before and after transformation can be very large relative to the size of the component before transformation.
-4. The component giving the biggest error in the regular precision matrix also gives the biggest error in the glasso matrix; the component locate at an off-diagonal entry.
-5. There is very difference in the evolution path between original and INT-transformed glasso components.
-6. As rho increases, eBIC increases without any sign of slowing the increase. This could imply a worsening representation of the original partial correlation structure as the model grow sparser.
-
-### 3.3 Does Conditional Centering significantly alter precision matrix?
+### 3.4 Does Conditional Centering significantly alter precision matrix?
 
 ```{r}
 ## Precision Matrix without penalty
@@ -207,7 +211,8 @@ cat("As compared maximum absolute value of all components before transformation:
 abs(originalPrecMat - condCenterPrecMat) == max(abs(originalCompo - condCenterPrecMat))
 
 ```
-Conditional centering of non-zero values did not alter precision matrix components as much as INT.
+**Observations**:
+1. Conditional centering of non-zero values did not alter precision matrix components as much as INT and shows stronger positive linear relationship to the original precision matrix components.
 
 ## 4. HurdleNormal with Different the Transformation Methods: Original, INT+Repositioning Hurdle, Conditional Centering
 ```{r}
@@ -224,6 +229,7 @@ plot(condcenter.X[,1], condcenter.X[,3], main = "Joint Distribution of Y1, Y2 af
 
 
 ```{r}
+library(gridExtra)
 hurdleComparison <- function(cancerType) {
   hurdleFit.original <- fitHurdle(original.X[cancerTypes == cancerType, ], nlambda = 10)
   hurdleFit.INT <- fitHurdle(INT.X.reposit[cancerTypes == cancerType, ], nlambda = 10)
@@ -241,7 +247,7 @@ hurdleComparison <- function(cancerType) {
                             labs(title = names(candidateModels)[i]))
   }
   
-  plot_grid(plotlist = bicPlotList, nrow = 1) %>% print()
+  grid.arrange(grobs = bicPlotList, nrow = 1) %>% print()
 
   ## Visualize the coef path
   coefPathList <- list()
@@ -257,34 +263,41 @@ hurdleComparison <- function(cancerType) {
   }
   
   ## Network Comparison
-  positList <- c(1,3,8,10)
   
-  networkPlotList <- list()
-  for (i in positList) {
-    originalGraph <- plot_parcorr_graph(candidateModels[[1]]$adjMat[[i]] %>% as.matrix(), 
-                                          candidateModels[[1]]$lambda[i] %>% round(2),
+  originalGraph <- plot_parcorr_graph(candidateModels[[1]]$adjMat[[5]] %>% as.matrix(), 
+                                          candidateModels[[1]]$lambda[5] %>% round(2),
                                           "Healthy", "Original")
-    intGraph <- plot_parcorr_graph(candidateModels[[2]]$adjMat[[i]] %>% as.matrix(), 
-                                        candidateModels[[2]]$lambda[i] %>% round(2),
-                                        "Healthy", "INT")
-    condCenterGraph <- plot_parcorr_graph(candidateModels[[3]]$adjMat[[i]] %>% as.matrix(), 
-                                        candidateModels[[3]]$lambda[i] %>% round(2),
-                                        "Healthy", "Conditional Centering")
-      
-    networkPlotList <- append(networkPlotList, 
-                          plot_grid(plotlist = list(originalGraph, intGraph, condCenterGraph),
-                                    nrow = 1))
+  intGraph <- plot_parcorr_graph(candidateModels[[2]]$adjMat[[5]] %>% as.matrix(), 
+                                      candidateModels[[2]]$lambda[5] %>% round(2),
+                                      "Healthy", "INT")
+  condCenterGraph <- plot_parcorr_graph(candidateModels[[3]]$adjMat[[5]] %>% as.matrix(), 
+                                      candidateModels[[3]]$lambda[5] %>% round(2),
+                                      "Healthy", "Conditional Centering")
+    
+  grid.arrange(grobs = list(originalGraph, intGraph, condCenterGraph),
+                                  nrow = 1) %>% print()
+  
+  ### Off-diagonal element pairwise comparison
+  positList <- c(3,5,8)
+  for (i in positList) {
+    originalCompo <- candidateModels[[1]]$adjMat[[i]] %>% takeUpperTriangle()
+    intCompo <- candidateModels[[2]]$adjMat[[i]] %>% takeUpperTriangle()
+    condCenterCompo <- candidateModels[[3]]$adjMat[[i]] %>% takeUpperTriangle()
+    rho = candidateModels[[1]]$lambda[i] %>% round(2)
+    
+    originalVsInt <- compareParScatter(originalCompo, intCompo, paste("INT vs Original: rho =", rho))
+    originalVsCond <- compareParScatter(originalCompo, condCenterCompo, paste("INT vs Cond' Center: rho =", rho))
+    
+    grid.arrange(grobs = list(originalVsInt, originalVsCond), nrow = 1) %>% print()
   }
   
-  plot_grid(plotlist = networkPlotList[1:2], ncol = 1, nrow = 4) %>% print()
-  plot_grid(plotlist = networkPlotList[1:2], ncol = 1, nrow = 4) %>% print()
   gc()
   return(0)
 }
 
 ```
 
-```{r message=F}
+```{r message=F, fig.height=5}
 hurdleComparison("Normal")
 hurdleComparison("Blood Cancer")
 ```
