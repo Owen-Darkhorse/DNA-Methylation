@@ -1,0 +1,269 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={251020-HurdleNormal on Scale Normalized Covariance Matrices},
+  pdfauthor={Jingxin Wang},
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\title{251020-HurdleNormal on Scale Normalized Covariance Matrices}
+\author{Jingxin Wang}
+\date{2025-11-02}
+
+\begin{document}
+\maketitle
+
+\hypertarget{last-time}{%
+\subsection{0. Last Time}\label{last-time}}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Application of Glasso on zero-inflated data before and after INT
+  transformation
+\end{enumerate}
+
+\begin{itemize}
+\tightlist
+\item
+  INT creates bigger differences in upper triangular entries than
+  Conditional centering in both penalized and unpenalized precision
+  matrix
+\end{itemize}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\setcounter{enumi}{1}
+\tightlist
+\item
+  Can we compare results of different transformation approaches with
+  same Glasso rho?\\
+\end{enumerate}
+
+\begin{itemize}
+\tightlist
+\item
+  Coefficient paths of original and conditional centering look similar,
+  but paths of INT differ slightly.
+\item
+  BIC paths before and after INT and conditional centering show the same
+  trend but differen absolute values between transformations.
+\item
+  As rho increases, do paths of precision matrix elements change much
+  before and after INT?\\
+\item
+  Center every column of the matrix and scale it by the same factor
+  before Glasso doesn't make too much difference in precision matrix?
+\end{itemize}
+
+\hypertarget{today}{%
+\subsection{1. Today}\label{today}}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  What are assumptions on multivariate normal distribution in
+  HurdleNormal?
+\end{enumerate}
+
+\begin{itemize}
+\tightlist
+\item
+  How does it imply rationale on conditional centering?
+\item
+  In Hurdle Normal Package, what kind of scaling and transformation were
+  applied to data before fitting a HurdleNormal model?
+\end{itemize}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\setcounter{enumi}{1}
+\tightlist
+\item
+  What kind of the rescaling should be applied to covariance matrix
+  \(\Sigma\) what kind of impact does it create?
+\end{enumerate}
+
+\begin{itemize}
+\tightlist
+\item
+  Does rescaling lead to sparser networks?
+\end{itemize}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\setcounter{enumi}{2}
+\tightlist
+\item
+  How to scale \(\rho\) values to make networks comparable betweeen
+  different transformations?
+\end{enumerate}
+
+\begin{itemize}
+\tightlist
+\item
+  How to choose the right \(\rho\) value
+\end{itemize}
+
+\hypertarget{model-formulation-and-assumptions}{%
+\subsection{Model Formulation and
+Assumptions}\label{model-formulation-and-assumptions}}
+
+Let's start with \textbf{univariate base case}. Let Y be a random
+variable that follows \(N(\mu, \sigma^2)\) distribution with probability
+p, and equals to 0 with probability 1-p.~Define \(v_y = I\{y \neq 0\}\)
+be the indicator of non-zero value of Y, the joint the distribution of Y
+and \(Y_y\) is \[
+f(y, v_y) = [p \phi((y - \mu)/\sigma)]^{v_y} [(1 - p) I\{ y = 0\}]^{1-v_y}
+\] Written in the form of exponential family is \[
+f(y, v_y) = \exp\{v_y [log(p) + \frac{1}{2} (y - \mu)^2/\sigma^2] + (1 - v_y)log(1-p) \}
+\] \[
+f(y, v_y) = \exp\{v_y [log(p / 1-p) + \frac{1}{2}(y^2/\sigma^2 - \mu y/\sigma^2 + \mu^2/\sigma^2)] + log(1-p)\}
+\]
+
+The marginal distribution of Y is \[
+f(y) = f(y, 1) + f(y, 0) = p \phi((y - \mu)/\sigma) + (1 - p)
+\] \[
+f(y) =  exp\{log(p) + \frac{1}{2}(y^2/\sigma^2 - \mu y/\sigma^2 + \mu^2/\sigma^2)\} + (1 - p) I\{y = 0\}
+\] The distribution of y is the sum of Lebesgue measure and Dirac mass
+of 1-p at zero, giving the zero inflation shape.
+
+\textbf{Multivariate Hurdle Models} Define
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \(\bf{Y}=\left[Y_1, \ldots, Y_m\right]\) be a random vector
+\item
+  \(\bf{V}=\left[V_1, \ldots, V_m\right]^T \equiv\left[I_{\left\{y_1 \neq 0\right\}}, \ldots, I_{\left\{y_m \neq 0\right\}}\right]^T\)
+\end{enumerate}
+
+Assume 1. Vector V follows an Ising model with joint probability \[
+p(\bf{v}) = \exp\{v^T G v\}. \text{ where G is symmetric matrix of m dimension}
+\] 2. \(\bf (Y | v) ~ N(\mu(v), |\Sigma(v))\), the normal distribution
+is singular and supported by subspace of \(\mathbb{R}^v\), where
+\(\mathbb{R}^{v_i} = R\) if \(v_i = 1\), \{0\} if \(v_i = 0\).
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\setcounter{enumi}{2}
+\tightlist
+\item
+  Propose a joint probability density function \[
+   \log f(\bf{y})=\bf{v}_{\bf{y}}^T \bf{G} \bf{v}_{\bf{y}}+\bf{v}_{\bf{y}}^T \bf{H} \bf{y}-\frac{1}{2} \bf{y}^T \bf{K y}-C(\bf{G}, \bf{H}, \bf{K}), \quad \bf{y} \in \mathbb{R}^m
+   \]
+\end{enumerate}
+
+\hypertarget{preprocessing-needed-to-accommodate-different-scales}{%
+\subsection{Preprocessing Needed to Accommodate Different
+Scales}\label{preprocessing-needed-to-accommodate-different-scales}}
+
+Let \(b \in \{1,2, ..., m\}\), and \(A = \{1,2, ..., m\} / \{b \}\), and
+\(a in A\), the anisometric penalty is a group lasso penalty for tuning
+parameter \(\lambda > 0\),
+
+\[
+P_{\bf{H}, \lambda}(\theta)=\lambda \sum_{a \in A} \sqrt{\theta_a^T \bf{H}_{a a} \theta_a}
+\] where \(θ_a = [g_{ba}, h_{ba}, h_{ba}, k_{ba}]\).
+
+The paper assumes that each variable in each block has a similar effect
+size. However, if variables are not measured in comparable units, the
+assumption can be problematic. Therefore, the paper advised
+\textbf{Z\_scoring each column of the design matrix X if no intrinsic
+scale exists}.
+
+In the vignette of single cell gene expression use case, columns were
+conditionally centered by mean values of non-zero parts. However,
+non-zero values were not re-scaled by their standard deviation to align
+with Z-score's scale, it is likely that author assumed that variables
+are measured in comparable units, ``total expression is measured using
+some linear quantification that reports values proportional to the input
+counts of mRNA''.
+
+\hypertarget{ways-to-rescale-sigmas-in-different-transformations}{%
+\subsection{\texorpdfstring{Ways to rescale \(\Sigma\)'s in different
+transformations}{Ways to rescale \textbackslash Sigma's in different transformations}}\label{ways-to-rescale-sigmas-in-different-transformations}}
+
+Conditional centering, power transformation (square root and log), and
+INT are monotonic and non-linear transformations. There is no
+universally valid analytic mapping between penalization parameters
+\(\rho\) that are applied to non-linearly transformed datasets. This is
+because penalization acts on elements of the covariance matrix. After
+transforming the original dataset, both magnitude and interpretation of
+covariances change.
+
+For linear or affine transformation, there exists a matrix
+transformation of precision matrix from before and after.\\
+For non-linear transformations, the relationship before and after the
+transformation is not linear or easily invertible in a closed form. So
+no simple analytical mapping of \(\rho\) can equalize penalization
+effect across datasets.
+
+Alternative solution: run HurdleNormal over a grid of \(\rho\) values,
+and select the valaue that achieve comparable BIC or graph sparsity as
+the original dataset.
+
+\end{document}
